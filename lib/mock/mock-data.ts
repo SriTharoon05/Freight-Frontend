@@ -1,18 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Centralised mock dataset for FreightOS frontend.
- * Every object is typed against lib/types.ts and internally consistent:
- *  - shipment.carrier_id always matches a carrier in `carriers`
- *  - shipment.shipper_id always matches a customer in `customers`
- *  - exceptions / documents / milestones link to real shipment ids
+ * Every object is typed against lib/types.ts and internally consistent.
  *
- * Scenario coverage baked in:
- *  - Happy path (populated lists + detail objects)
- *  - Empty states (warehouse inventory returns [] for one warehouse)
- *  - Pagination (multi-page shipments / exceptions / customers)
- *  - Every status & severity enum value represented at least once
- *  - Edge values (expired agent license, over-limit credit, volatile lane,
- *    long cargo descriptions, large paise amounts, pending approvals)
+ * Scenario coverage:
+ *  - Happy path, empty states (wh-2 inventory []), pagination
+ *  - Every status/severity/action_type enum represented
+ *  - Edge values: expired license, over-limit credit, volatile lane, pending approvals
+ *  - On-time / completion rates use 0–100 scale (matches UI formatting)
  */
 
 import type {
@@ -22,7 +17,7 @@ import type {
   WarehouseInventory, Customer, CustomerDetail, RateCard, AutomationControl,
   AutomationControlHistory, Carrier, LaneStats, CarrierPerformance,
   VendorSuggestion, QuoteRequest, LaneCheckResult, Escalation,
-  ApprovalQueueSummary, AssignmentManagerRow, AssignmentManagerStats,
+  AssignmentManagerRow, AssignmentManagerStats,
   EmailAnalysisResponse, CrmCustomer, CrmCarrier, CrmAgent,
 } from '../types';
 
@@ -58,11 +53,11 @@ export const mockUsers: User[] = [
 export const mockDashboardStats: DashboardStats = {
   active_count: 128,
   exceptions_open: 7,
-  dd_risk_paise: 4_85_000_00, // ₹4,85,000
+  dd_risk_paise: 4_85_000_00,
   pickups_due_today: 14,
 };
 
-// ─── CARRIERS (referenced everywhere) ───
+// ─── CARRIERS ───
 export const carriers: Carrier[] = [
   { id: 'car-1', name: 'Maersk Line', mode: 'ocean', active: true },
   { id: 'car-2', name: 'Emirates SkyCargo', mode: 'air', active: true },
@@ -88,7 +83,7 @@ export const customerDetails: Record<string, CustomerDetail> = {
   'cust-5': { ...customers[4], total_shipments: 18, active_shipments: 1 },
 };
 
-// ─── SHIPMENTS (covers many statuses + all 4 modes) ───
+// ─── SHIPMENTS ───
 export const shipments: Shipment[] = [
   { id: 'shp-1', ref_number: 'SHP-24001', bl_number: 'MAEU123456789', container_number: 'MSKU7654321', status: 'in_transit', transport_mode: 'ocean', shipper_id: 'cust-1', shipper_name: 'Tata Steel Ltd', carrier_id: 'car-1', carrier_name: 'Maersk Line', origin: 'Nhava Sheva, IN', destination: 'Rotterdam, NL', etd: days(-6), eta: days(12), created_at: days(-8), updated_at: hrs(-3) },
   { id: 'shp-2', ref_number: 'SHP-24002', bl_number: 'EK98765', status: 'customs_hold', transport_mode: 'air', shipper_id: 'cust-2', shipper_name: 'Zoho Corporation', carrier_id: 'car-2', carrier_name: 'Emirates SkyCargo', origin: 'Chennai, IN', destination: 'Dubai, AE', etd: days(-1), eta: days(1), has_pending_approvals: true, free_time_expires_at: hrs(20), created_at: days(-3), updated_at: hrs(-1) },
@@ -138,6 +133,8 @@ export const documents: Document[] = [
   { id: 'doc-4', shipment_id: 'shp-4', shipment_ref: 'SHP-24004', document_type: 'shipping_bill', status: 'failed', created_at: days(-3) },
   { id: 'doc-5', shipment_id: 'shp-3', shipment_ref: 'SHP-24003', document_type: 'proof_of_delivery', status: 'verified', file_url: 'https://example.com/mock/pod-3.pdf', generated_at: days(-2), verified_at: days(-2), created_at: days(-2) },
   { id: 'doc-6', shipment_id: 'shp-8', shipment_ref: 'SHP-24008', document_type: 'pickup_receipt', status: 'generated', file_url: 'https://example.com/mock/pickup-8.pdf', generated_at: hrs(-5), created_at: hrs(-5) },
+  { id: 'doc-7', shipment_id: 'shp-7', shipment_ref: 'SHP-24007', document_type: 'commercial_invoice', status: 'verified', file_url: 'https://example.com/mock/ci-7.pdf', generated_at: hrs(-6), verified_at: hrs(-3), created_at: hrs(-6) },
+  { id: 'doc-8', shipment_id: 'shp-6', shipment_ref: 'SHP-24006', document_type: 'warehouse_receipt', status: 'generated', file_url: 'https://example.com/mock/wh-6.pdf', generated_at: hrs(-14), created_at: hrs(-14) },
 ];
 
 // ─── MILESTONES (per shipment) ───
@@ -150,6 +147,18 @@ export const milestonesByShipment: Record<string, Milestone[]> = {
     { id: 'ms-5', shipment_id: 'shp-1', status: 'arrived', label: 'Arrival at destination', completed: false, location: 'Rotterdam' },
     { id: 'ms-6', shipment_id: 'shp-1', status: 'delivered', label: 'Delivered', completed: false, location: 'Rotterdam' },
   ],
+  'shp-4': [
+    { id: 'ms4-1', shipment_id: 'shp-4', status: 'booked', label: 'Booking confirmed', completed: true, completed_at: days(-15), location: 'Mundra' },
+    { id: 'ms4-2', shipment_id: 'shp-4', status: 'at_port', label: 'Arrived at port', completed: true, completed_at: days(-2), location: 'Hamburg' },
+    { id: 'ms4-3', shipment_id: 'shp-4', status: 'customs_hold', label: 'Held at customs', completed: true, completed_at: hrs(-6), location: 'Hamburg' },
+    { id: 'ms4-4', shipment_id: 'shp-4', status: 'customs_cleared', label: 'Customs cleared', completed: false, location: 'Hamburg' },
+  ],
+  'shp-8': [
+    { id: 'ms8-1', shipment_id: 'shp-8', status: 'booked', label: 'Booking confirmed', completed: true, completed_at: days(-1), location: 'Anand' },
+    { id: 'ms8-2', shipment_id: 'shp-8', status: 'picked_up', label: 'Picked up', completed: true, completed_at: hrs(-5), location: 'Anand' },
+    { id: 'ms8-3', shipment_id: 'shp-8', status: 'out_for_delivery', label: 'Out for delivery', completed: true, completed_at: mins(-30), location: 'Ahmedabad' },
+    { id: 'ms8-4', shipment_id: 'shp-8', status: 'delivered', label: 'Delivered', completed: false, location: 'Ahmedabad' },
+  ],
 };
 
 // ─── COMMUNICATIONS (per shipment) ───
@@ -159,12 +168,22 @@ export const communicationsByShipment: Record<string, CommunicationLog[]> = {
     { id: 'cm-2', shipment_id: 'shp-1', channel: 'whatsapp', direction: 'inbound', body: 'Thanks, please share the BL once loaded.', sender: '+91 98400 11111', sent_at: days(-7) },
     { id: 'cm-3', shipment_id: 'shp-1', channel: 'email', direction: 'outbound', subject: 'Vessel departed', body: 'Vessel has departed Nhava Sheva.', recipient: 'logistics@tatasteel.com', sender: 'ops@freightops.in', sent_at: days(-6) },
   ],
+  'shp-4': [
+    { id: 'cm4-1', shipment_id: 'shp-4', channel: 'email', direction: 'inbound', subject: 'URGENT: container stuck', body: 'Please expedite, we are incurring charges.', sender: 'logistics@tatasteel.com', recipient: 'ops@freightops.in', sent_at: hrs(-6) },
+    { id: 'cm4-2', shipment_id: 'shp-4', channel: 'email', direction: 'outbound', subject: 'RE: URGENT: container stuck', body: 'Escalating with customs, update in 2h.', recipient: 'logistics@tatasteel.com', sender: 'ops@freightops.in', sent_at: hrs(-5) },
+  ],
+  'shp-8': [
+    { id: 'cm8-1', shipment_id: 'shp-8', channel: 'sms', direction: 'outbound', body: 'Your delivery is out for delivery and will arrive today.', recipient: '+91 2692 258506', sender: 'FRTOPS', sent_at: mins(-25) },
+  ],
 };
 
 // ─── AGENT ASSIGNMENTS (per shipment) ───
 export const assignmentsByShipment: Record<string, AgentAssignment[]> = {
   'shp-8': [
     { id: 'as-1', shipment_id: 'shp-8', shipment_ref: 'SHP-24008', agent_id: 'agt-1', agent_name: 'Ravi Kumar', agent_phone: '+91 90000 11111', vehicle_number: 'TN-01-AB-1234', status: 'in_progress', lat: 22.3, lng: 72.6, assigned_at: hrs(-5) },
+  ],
+  'shp-3': [
+    { id: 'as-2', shipment_id: 'shp-3', shipment_ref: 'SHP-24003', agent_id: 'agt-2', agent_name: 'Sunita Devi', agent_phone: '+91 90000 22222', vehicle_number: 'GJ-05-CD-5678', status: 'completed', lat: 19.0, lng: 72.8, assigned_at: days(-3), completed_at: days(-2) },
   ],
 };
 
@@ -174,6 +193,7 @@ export const automationAudit: AutomationAudit[] = [
   { id: 'au-2', shipment_id: 'shp-2', action: 'send_quote_request', mode: 'human_approve', executed_by: 'usr-2', outcome: 'pending', created_at: hrs(-4) },
   { id: 'au-3', shipment_id: 'shp-4', action: 'file_shipping_bill', mode: 'auto', executed_by: 'system', outcome: 'failed', created_at: days(-3) },
   { id: 'au-4', shipment_id: 'shp-5', action: 'carrier_selection', mode: 'human_only', executed_by: 'usr-3', outcome: 'rejected', created_at: days(-1) },
+  { id: 'au-5', shipment_id: 'shp-8', action: 'auto_assign_agent', mode: 'auto', executed_by: 'system', outcome: 'success', created_at: hrs(-5) },
 ];
 
 // ─── QUOTES (per shipment) ───
@@ -182,22 +202,56 @@ export const quotesByShipment: Record<string, Quote[]> = {
     { id: 'q-1', shipment_id: 'shp-1', carrier_name: 'Maersk Line', amount_paise: 4_20_000_00, currency: 'INR', valid_until: days(5), status: 'accepted', created_at: days(-9) },
     { id: 'q-2', shipment_id: 'shp-1', carrier_name: 'Hapag-Lloyd', amount_paise: 4_65_000_00, currency: 'INR', valid_until: days(3), status: 'rejected', created_at: days(-9) },
   ],
+  'shp-2': [
+    { id: 'q-3', shipment_id: 'shp-2', carrier_name: 'Emirates SkyCargo', amount_paise: 2_10_000_00, currency: 'INR', valid_until: days(2), status: 'sent', created_at: hrs(-8) },
+  ],
+  'shp-5': [
+    { id: 'q-4', shipment_id: 'shp-5', carrier_name: 'Emirates SkyCargo', amount_paise: 1_80_000_00, currency: 'INR', valid_until: days(4), status: 'draft', created_at: hrs(-6) },
+  ],
 };
 
-// ─── APPROVAL QUEUE (all statuses + action types) ───
+// ─── APPROVAL QUEUE ───
+// The Approvals page loads ONLY status:'pending' then filters client-side by
+// action_type (Quote/Assignment/Document/Milestone/Exception/Invoice). So we
+// supply multiple PENDING items for EVERY action type, each with prepared_data
+// that formatPreparedData() reads, plus varied expiry (some urgent < 15 min)
+// and a few non-pending items for the other status views.
 export const approvalQueue: ApprovalQueueItem[] = [
-  { id: 'apq-1', action_type: 'quote', shipment_id: 'shp-2', shipment_ref: 'SHP-24002', summary: 'Approve carrier quote of ₹2,10,000 from Emirates SkyCargo', ai_recommendation: 'Recommended — 8% below lane average.', status: 'pending', expires_at: hrs(4), created_at: hrs(-2) },
-  { id: 'apq-2', action_type: 'carrier_selection', shipment_id: 'shp-4', shipment_ref: 'SHP-24004', summary: 'Select alternate carrier after delay', ai_recommendation: 'Switch to Hapag-Lloyd for faster transit.', status: 'pending', expires_at: hrs(1), created_at: hrs(-6) },
-  { id: 'apq-3', action_type: 'document', shipment_id: 'shp-7', shipment_ref: 'SHP-24007', summary: 'Auto-generate shipping bill', status: 'approved', created_at: days(-1), updated_at: hrs(-10) },
-  { id: 'apq-4', action_type: 'invoice', shipment_id: 'shp-3', shipment_ref: 'SHP-24003', summary: 'Raise final invoice for delivered shipment', status: 'auto_approved', created_at: days(-2), updated_at: days(-2) },
-  { id: 'apq-5', action_type: 'assignment', shipment_id: 'shp-6', shipment_ref: 'SHP-24006', summary: 'Assign rail slot for CONCOR booking', status: 'rejected', note: 'Slot unavailable', created_at: days(-1), updated_at: hrs(-20) },
-  { id: 'apq-6', action_type: 'rate_card', summary: 'Publish updated ocean rate card Q3', status: 'expired', created_at: days(-3) },
+  // QUOTE
+  { id: 'apq-q1', action_type: 'quote', shipment_id: 'shp-2', shipment_ref: 'SHP-24002', summary: 'Send carrier quote of ₹2,10,000 to Emirates SkyCargo', ai_recommendation: 'Recommended — 8% below the 90-day lane average.', status: 'pending', expires_at: hrs(4), created_at: hrs(-2), prepared_data: { amount_paise: 2_10_000_00, recipient_email: 'quotes@emirates.com', carrier_name: 'Emirates SkyCargo' } },
+  { id: 'apq-q2', action_type: 'quote', shipment_id: 'shp-1', shipment_ref: 'SHP-24001', summary: 'Send ocean freight quote of ₹4,20,000 to Tata Steel', ai_recommendation: 'In line with contracted rate card.', status: 'pending', expires_at: mins(12), created_at: hrs(-5), prepared_data: { amount_paise: 4_20_000_00, recipient_email: 'logistics@tatasteel.com', carrier_name: 'Maersk Line' } },
+  // ASSIGNMENT
+  { id: 'apq-a1', action_type: 'assignment', shipment_id: 'shp-8', shipment_ref: 'SHP-24008', summary: 'Assign pickup agent Mohan Das for Anand pickup', ai_recommendation: 'Closest available agent with highest score.', status: 'pending', expires_at: hrs(2), created_at: hrs(-1), prepared_data: { agent_name: 'Mohan Das', distance_km: 4.2, score: 92, agent_id: 'agt-3' } },
+  { id: 'apq-a2', action_type: 'assignment', shipment_id: 'shp-6', shipment_ref: 'SHP-24006', summary: 'Assign rail slot handler for CONCOR booking', ai_recommendation: 'Karthik S is available and rail-certified.', status: 'pending', expires_at: hrs(6), created_at: hrs(-3), prepared_data: { agent_name: 'Karthik S', distance_km: 7.8, score: 85, agent_id: 'agt-4' } },
+  // DOCUMENT
+  { id: 'apq-d1', action_type: 'document', shipment_id: 'shp-7', shipment_ref: 'SHP-24007', summary: 'Auto-generate shipping bill for Britannia export', ai_recommendation: 'All prerequisites met.', status: 'pending', expires_at: hrs(8), created_at: hrs(-4), prepared_data: { document_type: 'shipping_bill', shipment_ref: 'SHP-24007' } },
+  { id: 'apq-d2', action_type: 'document', shipment_id: 'shp-2', shipment_ref: 'SHP-24002', summary: 'Generate house bill of lading', ai_recommendation: 'Draft prepared from booking data.', status: 'pending', expires_at: mins(9), created_at: hrs(-6), prepared_data: { document_type: 'house_bill_of_lading', shipment_ref: 'SHP-24002' } },
+  // MILESTONE
+  { id: 'apq-m1', action_type: 'milestone', shipment_id: 'shp-1', shipment_ref: 'SHP-24001', summary: 'Confirm "Arrived at Rotterdam" milestone', ai_recommendation: 'Carrier tracking event received.', status: 'pending', expires_at: hrs(3), created_at: mins(-45), prepared_data: { milestone: 'arrived', location: 'Rotterdam' } },
+  { id: 'apq-m2', action_type: 'milestone', shipment_id: 'shp-8', shipment_ref: 'SHP-24008', summary: 'Mark "Out for delivery" as complete', ai_recommendation: 'Agent GPS confirms departure.', status: 'pending', expires_at: hrs(5), created_at: mins(-20), prepared_data: { milestone: 'out_for_delivery', location: 'Ahmedabad' } },
+  // EXCEPTION
+  { id: 'apq-e1', action_type: 'exception', shipment_id: 'shp-4', shipment_ref: 'SHP-24004', summary: 'Approve demurrage escalation for stuck container', ai_recommendation: 'Free time expired 6h ago.', status: 'pending', expires_at: mins(5), created_at: hrs(-6), prepared_data: { severity: 'critical', dd_exposure_paise: 1_85_000_00 } },
+  { id: 'apq-e2', action_type: 'exception', shipment_id: 'shp-5', shipment_ref: 'SHP-24005', summary: 'Approve alternate-carrier fallback (vendor no-response)', ai_recommendation: 'Primary carrier unresponsive for 6h.', status: 'pending', expires_at: hrs(1), created_at: hrs(-2), prepared_data: { severity: 'high' } },
+  // INVOICE
+  { id: 'apq-i1', action_type: 'invoice', shipment_id: 'shp-3', shipment_ref: 'SHP-24003', summary: 'Raise final invoice of ₹1,20,000 for delivered shipment', ai_recommendation: 'Delivery confirmed with POD.', status: 'pending', expires_at: hrs(12), created_at: hrs(-8), prepared_data: { amount_paise: 1_20_000_00, recipient_email: 'exports@amul.coop' } },
+  { id: 'apq-i2', action_type: 'invoice', shipment_id: 'shp-1', shipment_ref: 'SHP-24001', summary: 'Approve interim invoice for ocean freight', ai_recommendation: 'Partial billing per contract milestone.', status: 'pending', expires_at: hrs(20), created_at: hrs(-10), prepared_data: { amount_paise: 2_00_000_00, recipient_email: 'logistics@tatasteel.com' } },
+  // carrier_selection (shows under "All")
+  { id: 'apq-c1', action_type: 'carrier_selection', shipment_id: 'shp-4', shipment_ref: 'SHP-24004', summary: 'Select alternate carrier after 48h delay', ai_recommendation: 'Switch to Hapag-Lloyd for faster transit.', status: 'pending', expires_at: hrs(1), created_at: hrs(-6), prepared_data: { carrier_name: 'Hapag-Lloyd' } },
+  // non-pending (for approved / rejected / expired / auto_approved views)
+  { id: 'apq-h1', action_type: 'document', shipment_id: 'shp-7', shipment_ref: 'SHP-24007', summary: 'Auto-generate packing list', status: 'approved', created_at: days(-1), updated_at: hrs(-10) },
+  { id: 'apq-h2', action_type: 'invoice', shipment_id: 'shp-3', shipment_ref: 'SHP-24003', summary: 'Interim invoice auto-approved on timeout', status: 'auto_approved', created_at: days(-2), updated_at: days(-2) },
+  { id: 'apq-h3', action_type: 'assignment', shipment_id: 'shp-6', shipment_ref: 'SHP-24006', summary: 'Assign rail slot for CONCOR booking', status: 'rejected', note: 'Slot unavailable', created_at: days(-1), updated_at: hrs(-20) },
+  { id: 'apq-h4', action_type: 'rate_card', summary: 'Publish updated ocean rate card Q3', status: 'expired', created_at: days(-3) },
 ];
 
-export const approvalSummary: ApprovalQueueSummary = {
-  pending: 2,
-  expiring_soon: 1,
-  oldest_minutes: 360,
+// Matches app/approvals/page.tsx: pending_count, urgent_count, by_type
+export const approvalSummary = {
+  pending_count: approvalQueue.filter((a) => a.status === 'pending').length,
+  urgent_count: approvalQueue.filter((a) => a.status === 'pending' && a.expires_at && new Date(a.expires_at).getTime() - Date.now() < 15 * 60_000).length,
+  by_type: approvalQueue.filter((a) => a.status === 'pending').reduce((acc, a) => {
+    acc[a.action_type] = (acc[a.action_type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>),
 };
 
 // ─── ASSIGNMENTS + AVAILABLE AGENTS ───
@@ -251,11 +305,12 @@ export const automationControlHistory: AutomationControlHistory[] = [
 // ─── ANALYTICS ───
 export const ddSaved = { total_paise: 18_60_000_00, prevented_count: 34 };
 
-// ─── VENDOR INTELLIGENCE ───
+// ─── VENDOR INTELLIGENCE (on_time_rate on 0–100 scale) ───
 export const laneStats: LaneStats[] = [
-  { carrier_id: 'car-1', carrier_name: 'Maersk Line', transport_mode: 'ocean', origin_country: 'IN', dest_country: 'NL', shipments_90d: 42, on_time_rate: 0.94, avg_transit_days: 22 },
-  { carrier_id: 'car-2', carrier_name: 'Emirates SkyCargo', transport_mode: 'air', origin_country: 'IN', dest_country: 'AE', shipments_90d: 88, on_time_rate: 0.97, avg_transit_days: 1 },
-  { carrier_id: 'car-4', carrier_name: 'CONCOR Rail', transport_mode: 'rail', origin_country: 'IN', dest_country: 'IN', shipments_90d: 120, on_time_rate: 0.89, avg_transit_days: 3 },
+  { carrier_id: 'car-1', carrier_name: 'Maersk Line', transport_mode: 'ocean', origin_country: 'IN', dest_country: 'NL', shipments_90d: 42, on_time_rate: 94, avg_transit_days: 22 },
+  { carrier_id: 'car-2', carrier_name: 'Emirates SkyCargo', transport_mode: 'air', origin_country: 'IN', dest_country: 'AE', shipments_90d: 88, on_time_rate: 97, avg_transit_days: 1 },
+  { carrier_id: 'car-4', carrier_name: 'CONCOR Rail', transport_mode: 'rail', origin_country: 'IN', dest_country: 'IN', shipments_90d: 120, on_time_rate: 89, avg_transit_days: 3 },
+  { carrier_id: 'car-3', carrier_name: 'BlueDart Surface', transport_mode: 'road', origin_country: 'IN', dest_country: 'IN', shipments_90d: 65, on_time_rate: 68, avg_transit_days: 2 },
 ];
 
 export const vendorSuggestions: VendorSuggestion[] = [
@@ -267,11 +322,11 @@ export const carrierPerformance: CarrierPerformance = {
   carrier_id: 'car-1',
   carrier_name: 'Maersk Line',
   total_shipments: 210,
-  on_time_rate: 0.93,
+  on_time_rate: 93,
   avg_transit_days: 23,
   lanes: [
-    { origin_country: 'IN', dest_country: 'NL', count: 42, on_time_rate: 0.94, avg_transit_days: 22 },
-    { origin_country: 'IN', dest_country: 'DE', count: 30, on_time_rate: 0.90, avg_transit_days: 24 },
+    { origin_country: 'IN', dest_country: 'NL', count: 42, on_time_rate: 94, avg_transit_days: 22 },
+    { origin_country: 'IN', dest_country: 'DE', count: 30, on_time_rate: 90, avg_transit_days: 24 },
   ],
 };
 
@@ -339,6 +394,22 @@ export const emailAnalysisByShipment: Record<string, EmailAnalysisResponse> = {
     ],
     analysis: null, // not-yet-analysed scenario
   },
+  'shp-2': {
+    emails: [
+      { id: 'em-4', direction: 'inbound', from_email: 'ship@zoho.com', to_emails: ['ops@freightops.in'], subject: 'Customs documents', body: 'Attaching the commercial invoice for customs clearance.', received_at: hrs(-10), intent: 'document_submission' },
+    ],
+    analysis: {
+      shipment_id: 'shp-2',
+      priority: 'high',
+      sentiment: 'neutral',
+      summary: 'Customer submitted customs documents; clearance pending examination.',
+      action_required: true,
+      action_description: 'Forward invoice to customs broker and track examination status.',
+      key_dates: [{ date: hrs(20), event: 'Free time expires' }],
+      risk_flags: ['customs_examination'],
+      analyzed_at: hrs(-9),
+    },
+  },
 };
 
 // ─── CRM ───
@@ -350,16 +421,18 @@ export const crmCustomers: CrmCustomer[] = [
   { ...customers[4], contact_name: 'Vivek Anand', credit_status: 'overdue' },
 ];
 
+// avg_on_time on 0–100 scale (UI does .toFixed(0) + '%')
 export const crmCarriers: CrmCarrier[] = [
-  { id: 'car-1', name: 'Maersk Line', code: 'MAEU', transport_mode: 'ocean', scac: 'MAEU', free_time_origin_days: 7, free_time_dest_days: 5, dd_rate_per_day_cents: 15000, lanes: 'IN-NL, IN-DE', avg_on_time: 0.93, active: true, created_at: days(-400) },
-  { id: 'car-2', name: 'Emirates SkyCargo', code: 'EK', transport_mode: 'air', scac: 'EKGB', free_time_origin_days: 2, free_time_dest_days: 2, dd_rate_per_day_cents: 30000, lanes: 'IN-AE, IN-SG', avg_on_time: 0.97, active: true, created_at: days(-380) },
-  { id: 'car-4', name: 'CONCOR Rail', code: 'CONR', transport_mode: 'rail', free_time_origin_days: 3, free_time_dest_days: 3, avg_on_time: 0.89, active: true, created_at: days(-350) },
-  { id: 'car-5', name: 'Hapag-Lloyd', code: 'HLCU', transport_mode: 'ocean', scac: 'HLCU', avg_on_time: 0.88, active: false, created_at: days(-300) },
+  { id: 'car-1', name: 'Maersk Line', code: 'MAEU', transport_mode: 'ocean', scac: 'MAEU', free_time_origin_days: 7, free_time_dest_days: 5, dd_rate_per_day_cents: 15000, lanes: 'IN-NL, IN-DE', avg_on_time: 93, active: true, created_at: days(-400) },
+  { id: 'car-2', name: 'Emirates SkyCargo', code: 'EK', transport_mode: 'air', scac: 'EKGB', free_time_origin_days: 2, free_time_dest_days: 2, dd_rate_per_day_cents: 30000, lanes: 'IN-AE, IN-SG', avg_on_time: 97, active: true, created_at: days(-380) },
+  { id: 'car-4', name: 'CONCOR Rail', code: 'CONR', transport_mode: 'rail', free_time_origin_days: 3, free_time_dest_days: 3, avg_on_time: 89, active: true, created_at: days(-350) },
+  { id: 'car-5', name: 'Hapag-Lloyd', code: 'HLCU', transport_mode: 'ocean', scac: 'HLCU', avg_on_time: 88, active: false, created_at: days(-300) },
 ];
 
+// completion_rate on 0–100 scale (UI does `${rate}%`)
 export const crmAgents: CrmAgent[] = [
-  { id: 'agt-1', full_name: 'Ravi Kumar', phone: '+91 90000 11111', email: 'ravi@fleet.in', vehicle_type: 'Container Truck', vehicle_number: 'TN-01-AB-1234', license_number: 'DL-1420110012345', license_expiry: days(300), status: 'available', verification_status: 'verified', rating: 4.7, total_jobs: 210, completion_rate: 0.98, created_at: days(-200) },
-  { id: 'agt-2', full_name: 'Sunita Devi', phone: '+91 90000 22222', vehicle_type: 'Reefer Van', vehicle_number: 'GJ-05-CD-5678', license_number: 'GJ-0520110067890', license_expiry: days(120), status: 'available', verification_status: 'verified', rating: 4.5, total_jobs: 140, completion_rate: 0.96, created_at: days(-180) },
-  { id: 'agt-6', full_name: 'Faizal Khan', phone: '+91 90000 66666', email: 'faizal@fleet.in', vehicle_type: 'Flatbed', vehicle_number: 'MH-12-KL-2345', license_number: 'MH-1220110054321', license_expiry: days(-10), status: 'offline', verification_status: 'pending', rating: 0, total_jobs: 0, completion_rate: 0, created_at: days(-3) }, // EXPIRED license + pending verification
-  { id: 'agt-7', full_name: 'Deepak Verma', phone: '+91 90000 77777', vehicle_type: 'Container Truck', vehicle_number: 'DL-01-MN-6789', license_number: 'DL-0120110098765', license_expiry: days(60), status: 'suspended', verification_status: 'rejected', rejection_reason: 'License document illegible; resubmission required.', rating: 3.2, total_jobs: 12, completion_rate: 0.75, created_at: days(-90) },
+  { id: 'agt-1', full_name: 'Ravi Kumar', phone: '+91 90000 11111', email: 'ravi@fleet.in', vehicle_type: 'container_truck', vehicle_number: 'TN-01-AB-1234', license_number: 'DL-1420110012345', license_expiry: days(300), status: 'available', verification_status: 'verified', rating: 4.7, total_jobs: 210, completion_rate: 98, created_at: days(-200) },
+  { id: 'agt-2', full_name: 'Sunita Devi', phone: '+91 90000 22222', vehicle_type: 'mini_truck', vehicle_number: 'GJ-05-CD-5678', license_number: 'GJ-0520110067890', license_expiry: days(120), status: 'available', verification_status: 'verified', rating: 4.5, total_jobs: 140, completion_rate: 96, created_at: days(-180) },
+  { id: 'agt-6', full_name: 'Faizal Khan', phone: '+91 90000 66666', email: 'faizal@fleet.in', vehicle_type: 'truck', vehicle_number: 'MH-12-KL-2345', license_number: 'MH-1220110054321', license_expiry: days(-10), status: 'offline', verification_status: 'pending', rating: 0, total_jobs: 0, completion_rate: 0, created_at: days(-3) }, // EXPIRED license + pending verification
+  { id: 'agt-7', full_name: 'Deepak Verma', phone: '+91 90000 77777', vehicle_type: 'container_truck', vehicle_number: 'DL-01-MN-6789', license_number: 'DL-0120110098765', license_expiry: days(60), status: 'suspended', verification_status: 'rejected', rejection_reason: 'License document illegible; resubmission required.', rating: 3.2, total_jobs: 12, completion_rate: 75, created_at: days(-90) },
 ];

@@ -439,10 +439,11 @@ export interface PaginatedEscalations {
 
 // ─── Approval Queue Summary ───
 
+// ─── Approval Queue Summary ───
 export interface ApprovalQueueSummary {
-  pending: number;
-  expiring_soon: number;
-  oldest_minutes: number;
+  pending_count: number;
+  urgent_count: number;
+  by_type: Record<string, number>;
 }
 
 // ─── Assignment Manager ───

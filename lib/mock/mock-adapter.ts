@@ -2,12 +2,13 @@
 /**
  * Drop-in axios mock adapter for FreightOS.
  *
- * Install once (see api-client.ts wiring in the instructions) and every
- * request made through the `api` instance is served from lib/mock/mock-data.ts
- * instead of hitting the real backend. No changes needed in any *Api object
- * or component.
+ * Wire once in lib/api-client.ts:
+ *   import { installMockAdapter } from './mock/mock-adapter';
+ *   if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') installMockAdapter(api);
  *
- * Toggle with:  NEXT_PUBLIC_USE_MOCK=true
+ * Then set NEXT_PUBLIC_USE_MOCK=true in .env.local. Every request through the
+ * `api` instance is served from lib/mock/mock-data.ts — no changes needed in
+ * any *Api object or component.
  */
 
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
@@ -54,8 +55,24 @@ const routes: Route[] = [
   // DASHBOARD
   { method: 'get', re: /^\/shipments\/stats$/, handler: () => M.mockDashboardStats },
 
-  // SHIPMENTS  (list is array for dashboard, paginated for list page)
-  { method: 'get', re: /^\/shipments$/, handler: ({ params }) => wantsPaginated(params) ? paginate(M.shipments, params) : M.shipments.slice(0, Number(params?.limit ?? 20)) },
+  // SHIPMENTS (array for dashboard, filtered+paginated for list page)
+  { method: 'get', re: /^\/shipments$/, handler: ({ params }) => {
+      let list = M.shipments;
+      if (params?.status)     list = list.filter((s) => s.status === params.status);
+      if (params?.mode)       list = list.filter((s) => s.transport_mode === params.mode);
+      if (params?.shipper_id) list = list.filter((s) => s.shipper_id === params.shipper_id);
+      if (params?.carrier_id) list = list.filter((s) => s.carrier_id === params.carrier_id);
+      if (params?.search) {
+        const q = String(params.search).toLowerCase();
+        list = list.filter((s) =>
+          s.ref_number.toLowerCase().includes(q) ||
+          s.bl_number?.toLowerCase().includes(q) ||
+          s.container_number?.toLowerCase().includes(q) ||
+          s.shipper_name?.toLowerCase().includes(q)
+        );
+      }
+      return wantsPaginated(params) ? paginate(list, params) : list.slice(0, Number(params?.limit ?? 20));
+  } },
   { method: 'post', re: /^\/shipments$/, handler: ({ body }) => ({ id: 'shp-new', ref_number: 'SHP-24999', status: 'draft', created_at: new Date().toISOString(), ...body }) },
   { method: 'get', re: /^\/shipments\/([^/]+)\/documents$/, handler: ({ m }) => M.documents.filter((d) => d.shipment_id === m![1]) },
   { method: 'post', re: /^\/shipments\/([^/]+)\/documents\/generate$/, handler: ({ m, body }) => ({ id: 'doc-new', shipment_id: m![1], document_type: body?.document_type ?? 'commercial_invoice', status: 'generated', generated_at: new Date().toISOString(), created_at: new Date().toISOString() }) },
@@ -69,7 +86,12 @@ const routes: Route[] = [
   { method: 'get', re: /^\/shipments\/([^/]+)$/, handler: ({ m }) => M.shipmentDetails[m![1]] ?? M.shipmentDetails['shp-1'] },
 
   // EXCEPTIONS (array for dashboard, paginated for list page)
-  { method: 'get', re: /^\/exceptions$/, handler: ({ params }) => wantsPaginated(params) ? paginate(M.exceptions, params) : M.exceptions.filter((e) => !params?.status || e.status === params.status).slice(0, Number(params?.limit ?? 10)) },
+  { method: 'get', re: /^\/exceptions$/, handler: ({ params }) => {
+      let list = M.exceptions;
+      if (params?.status)   list = list.filter((e) => e.status === params.status);
+      if (params?.severity) list = list.filter((e) => e.severity === params.severity);
+      return wantsPaginated(params) ? paginate(list, params) : list.slice(0, Number(params?.limit ?? 10));
+  } },
   { method: 'patch', re: /^\/exceptions\/([^/]+)\/acknowledge$/, handler: ({ m }) => ({ id: m![1], status: 'acknowledged' }) },
   { method: 'patch', re: /^\/exceptions\/([^/]+)\/resolve$/, handler: ({ m, body }) => ({ id: m![1], status: 'resolved', resolution_notes: body?.resolution_notes }) },
   { method: 'patch', re: /^\/exceptions\/([^/]+)\/escalate$/, handler: ({ m }) => ({ id: m![1], status: 'escalated' }) },
@@ -95,14 +117,19 @@ const routes: Route[] = [
 
   // WAREHOUSE
   { method: 'get', re: /^\/warehouse\/bays$/, handler: ({ params }) => params?.warehouse_id ? M.warehouseBays.filter((b) => b.warehouse_id === params.warehouse_id) : M.warehouseBays },
-  { method: 'get', re: /^\/warehouse\/inventory$/, handler: ({ params }) => params?.warehouse_id ? M.warehouseInventory.filter((i) => i.warehouse_id === params.warehouse_id) : M.warehouseInventory },
+  { method: 'get', re: /^\/warehouse\/inventory$/, handler: ({ params }) => {
+      let list = M.warehouseInventory;
+      if (params?.warehouse_id) list = list.filter((i) => i.warehouse_id === params.warehouse_id);
+      if (params?.status)       list = list.filter((i) => i.status === params.status);
+      return list;
+  } },
 
   // DOCUMENTS
   { method: 'get', re: /^\/documents$/, handler: ({ params }) => M.documents.filter((d) => (!params?.type || d.document_type === params.type) && (!params?.status || d.status === params.status)) },
   { method: 'get', re: /^\/documents\/([^/]+)\/download$/, handler: () => ({ signed_url: 'https://example.com/mock/download.pdf' }) },
 
   // CUSTOMERS
-  { method: 'get', re: /^\/customers$/, handler: ({ params }) => paginate(M.customers.filter((c) => !params?.search || c.name.toLowerCase().includes(String(params.search).toLowerCase())), params) },
+  { method: 'get', re: /^\/customers$/, handler: ({ params }) => paginate(M.customers.filter((c) => !params?.search || c.name.toLowerCase().includes(String(params.search).toLowerCase()) || c.gstin?.toLowerCase().includes(String(params.search).toLowerCase()) || c.email?.toLowerCase().includes(String(params.search).toLowerCase())), params) },
   { method: 'get', re: /^\/customers\/([^/]+)\/shipments$/, handler: ({ m }) => M.shipments.filter((s) => s.shipper_id === m![1]) },
   { method: 'get', re: /^\/customers\/([^/]+)$/, handler: ({ m }) => M.customerDetails[m![1]] ?? M.customerDetails['cust-1'] },
 
@@ -126,10 +153,16 @@ const routes: Route[] = [
   { method: 'get', re: /^\/analytics\/dd-saved$/, handler: () => M.ddSaved },
 
   // VENDOR INTELLIGENCE
-  { method: 'get', re: /^\/vendor-intelligence\/lane-stats$/, handler: ({ params }) => paginate(M.laneStats, params) },
+  { method: 'get', re: /^\/vendor-intelligence\/lane-stats$/, handler: ({ params }) => {
+      let list = M.laneStats;
+      if (params?.transport_mode) list = list.filter((l) => l.transport_mode === params.transport_mode);
+      if (params?.origin_country) list = list.filter((l) => l.origin_country.toLowerCase() === String(params.origin_country).toLowerCase());
+      if (params?.dest_country)   list = list.filter((l) => l.dest_country.toLowerCase() === String(params.dest_country).toLowerCase());
+      return paginate(list, params);
+  } },
   { method: 'get', re: /^\/vendor-intelligence\/suggest\/([^/]+)$/, handler: () => M.vendorSuggestions },
   { method: 'post', re: /^\/vendor-intelligence\/auto-assign\/([^/]+)$/, handler: ({ m }) => ({ shipment_id: m![1], assigned_carrier_id: 'car-1', ok: true }) },
-  { method: 'get', re: /^\/vendor-intelligence\/carrier-performance$/, handler: () => M.carrierPerformance },
+  { method: 'get', re: /^\/vendor-intelligence\/carrier-performance$/, handler: ({ params }) => ({ ...M.carrierPerformance, carrier_id: params?.carrier_id ?? M.carrierPerformance.carrier_id }) },
 
   // VENDOR QUOTES
   { method: 'post', re: /^\/vendor-quotes\/request$/, handler: ({ body }) => ({ ok: true, ...body }) },
@@ -184,15 +217,14 @@ const routes: Route[] = [
 export function installMockAdapter(api: AxiosInstance) {
   api.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
     const method = (config.method ?? 'get').toLowerCase();
-    // strip baseURL + query string → clean path like "/shipments/shp-1"
     const rawUrl = config.url ?? '';
     const path = rawUrl.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*$/, '').replace(/\/+$/, '') || '/';
 
     let body: any = config.data;
     if (typeof body === 'string') { try { body = JSON.parse(body); } catch { /* keep as-is */ } }
 
-    // simulate light network latency (comment out for instant responses)
-    await new Promise((r) => setTimeout(r, 150));
+    // simulate light network latency (set to 0 for instant responses)
+    await new Promise((r) => setTimeout(r, 120));
 
     for (const route of routes) {
       if (route.method !== method) continue;
@@ -204,7 +236,7 @@ export function installMockAdapter(api: AxiosInstance) {
       return ok(data, config);
     }
 
-    // no route matched → return a benign empty 200 so the UI never hard-crashes
+    // no route matched → benign empty 200 so the UI never hard-crashes
     // eslint-disable-next-line no-console
     console.warn(`[mock] Unhandled ${method.toUpperCase()} ${path} — returning empty payload`);
     return ok({ items: [], total: 0, page: 1, limit: 20 }, config);
