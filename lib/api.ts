@@ -17,13 +17,13 @@ import type {
 // AUTH
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post<AuthResponse>('/auth/login', { email, password }).then((r) => r.data),
+    api.post<AuthResponse>('/login', { email, password }).then((r) => r.data),
   refresh: () =>
-    api.post<{ access_token: string }>('/auth/refresh').then((r) => r.data),
+    api.post<{ access_token: string }>('/refresh').then((r) => r.data),
   me: () =>
-    api.get<User>('/auth/me').then((r) => r.data),
+    api.get<User>('/me').then((r) => r.data),
   logout: () =>
-    api.post('/auth/logout').then((r) => r.data),
+    api.post('/logout').then((r) => r.data),
 };
 
 // DASHBOARD

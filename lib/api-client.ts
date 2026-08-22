@@ -57,7 +57,7 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retried?: boolean };
 
-    if (error.response?.status === 401 && !originalRequest._retried && !originalRequest.url?.includes('/auth/')) {
+    if (error.response?.status === 401 && !originalRequest._retried && !originalRequest.url?.includes('/')) {
       originalRequest._retried = true;
       try {
         if (!isRefreshing) {

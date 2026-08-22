@@ -38,23 +38,23 @@ const onSubmit = async (data: FormData) => {
   setLoading(true);
 
   // 🔧 TEMP DEV BYPASS — REMOVE BEFORE PRODUCTION
-  if (data.email === 'admin@gmail.com' && data.password === 'admin') {
-    const mockToken = 'dev-bypass-token';
-    const mockUser = {
-      id: 'dev-admin',
-      email: 'admin@gmail.com',
-      full_name: 'Dev Admin',
-      role: 'admin',
-    } as any;
+  // if (data.email === 'admin@gmail.com' && data.password === 'admin') {
+  //   const mockToken = 'dev-bypass-token';
+  //   const mockUser = {
+  //     id: 'dev-admin',
+  //     email: 'admin@gmail.com',
+  //     full_name: 'Dev Admin',
+  //     role: 'admin',
+  //   } as any;
 
-    setToken(mockToken);                              // localStorage (for api-client)
-    document.cookie = `freightos_token=${mockToken}; path=/; SameSite=Lax`; // cookie (for middleware)
-    setAuth(mockToken, mockUser);
-    toast.success('Signed in (dev bypass)');
-    router.push('/dashboard');
-    setLoading(false);
-    return;
-  }
+  //   setToken(mockToken);                              // localStorage (for api-client)
+  //   document.cookie = `freightos_token=${mockToken}; path=/; SameSite=Lax`; // cookie (for middleware)
+  //   setAuth(mockToken, mockUser);
+  //   toast.success('Signed in (dev bypass)');
+  //   router.push('/dashboard');
+  //   setLoading(false);
+  //   return;
+  // }
   // 🔧 END TEMP DEV BYPASS
 
   try {

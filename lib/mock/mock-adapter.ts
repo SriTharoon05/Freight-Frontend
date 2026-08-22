@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/**  eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Drop-in axios mock adapter for FreightOS.
  *

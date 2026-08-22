@@ -1,11 +1,13 @@
 /** @type {import('next').NextConfig} */
+const isDev = process.env.NODE_ENV === 'development';
+
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: https:",
-  "connect-src 'self' https://*.supabase.co https://api.mapbox.com wss://*.supabase.co",
+  `connect-src 'self' https://*.supabase.co https://api.mapbox.com wss://*.supabase.co ${isDev ? 'http://localhost:8000' : (process.env.NEXT_PUBLIC_API_BASE_URL ?? '')}`,
   "frame-src 'self'",
 ];
 
