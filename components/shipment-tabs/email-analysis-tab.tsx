@@ -10,7 +10,6 @@ import { Card } from '@/components/shell/card';
 import { EmptyState, ErrorState } from '@/components/shell/states';
 import { formatIST, timeAgo } from '@/lib/date';
 import { toApiError } from '@/lib/api-client';
-import { supabase } from '@/lib/supabase';
 import type { EmailThreadItem, EmailAnalysis } from '@/lib/types';
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -39,9 +38,10 @@ export function EmailAnalysisTab({ shipmentId }: { shipmentId: string }) {
 
   const analyzeMutation = useMutation({
     mutationFn: () => emailAnalysisApi.analyze(shipmentId),
-    onSuccess: () => {
-      toast.success('Analysis started — results will appear shortly');
-      setAnalyzing(true);
+    onSuccess: (result) => {
+      toast.success(result.message);
+      setAnalyzing(Boolean(result.task_id));
+      queryClient.invalidateQueries({ queryKey: queryKeys.emailAnalysis(shipmentId) });
     },
     onError: (err) => {
       toast.error(toApiError(err as any).message);
@@ -51,14 +51,9 @@ export function EmailAnalysisTab({ shipmentId }: { shipmentId: string }) {
 
   useEffect(() => {
     if (!analyzing) return;
-    const channel = supabase
-      .channel(`email_analysis_${shipmentId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'email_analysis', filter: `shipment_id=eq.${shipmentId}` }, () => {
-        setAnalyzing(false);
-        queryClient.invalidateQueries({ queryKey: queryKeys.emailAnalysis(shipmentId) });
-        toast.success('Email analysis complete');
-      })
-      .subscribe();
+    const poll = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.emailAnalysis(shipmentId) });
+    }, 3000);
 
     const timeout = setTimeout(() => {
       setAnalyzing(false);
@@ -66,7 +61,7 @@ export function EmailAnalysisTab({ shipmentId }: { shipmentId: string }) {
     }, 30000);
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(poll);
       clearTimeout(timeout);
     };
   }, [analyzing, shipmentId, queryClient]);

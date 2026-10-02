@@ -1,31 +1,41 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from './auth-store';
 import { authApi } from './api';
-import { setToken } from './api-client';
+import { getToken, setToken, toApiError } from './api-client';
 
 export function useAuthHydration() {
   const { setAuth, clear, hydrated } = useAuthStore();
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (hydrated) return;
-    const token = typeof window !== 'undefined' ? localStorage.getItem('freightos_token') : null;
+    const token = getToken();
     if (!token) {
       clear();
       return;
     }
+    let active = true;
+    setError(null);
     authApi
       .me()
       .then((user) => {
-        setToken(token);
-        setAuth(token, user);
+        if (active) setAuth(getToken() || token, user);
       })
-      .catch(() => {
-        setToken(null);
-        clear();
+      .catch((reason: unknown) => {
+        if (!active) return;
+        const failure = toApiError(reason);
+        if (failure.status === 401 || failure.status === 403) {
+          setToken(null);
+          clear();
+        } else {
+          setError(failure.message);
+        }
       });
-  }, [setAuth, clear, hydrated]);
+    return () => { active = false; };
+  }, [setAuth, clear, hydrated, attempt]);
 
-  return hydrated;
+  return { hydrated, error, retry: () => setAttempt((value) => value + 1) };
 }

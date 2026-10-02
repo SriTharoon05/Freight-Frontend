@@ -1,4 +1,4 @@
-import { api } from './api-client';
+import { api, refreshSession } from './api-client';
 import type {
   AuthResponse, User, DashboardStats, Exception, PaginatedExceptions,
   Shipment, PaginatedShipments, ShipmentDetail, Document, Milestone,
@@ -17,11 +17,11 @@ import type {
 // AUTH
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post<AuthResponse>('/auth/login', { email, password }).then((r) => r.data),
+    api.post<AuthResponse>('/auth/login', { email, password }, { timeout: 90000 }).then((r) => r.data),
   refresh: () =>
-    api.post<{ access_token: string }>('/auth/refresh').then((r) => r.data),
+    refreshSession().then((access_token) => ({ access_token })),
   me: () =>
-    api.get<User>('/auth/me').then((r) => r.data),
+    api.get<User>('/auth/me', { timeout: 90000 }).then((r) => r.data),
   logout: () =>
     api.post('/auth/logout').then((r) => r.data),
 };
@@ -37,9 +37,21 @@ export const dashboardApi = {
 };
 
 // APPROVALS
+function normalizeApprovalQueueResponse(response: unknown): ApprovalQueueItem[] {
+  if (Array.isArray(response)) return response as ApprovalQueueItem[];
+  if (!response || typeof response !== 'object') return [];
+
+  const payload = response as Record<string, unknown>;
+  for (const key of ['items', 'data', 'results', 'queue']) {
+    if (Array.isArray(payload[key])) return payload[key] as ApprovalQueueItem[];
+  }
+
+  return [];
+}
+
 export const approvalsApi = {
   list: (status = 'pending', limit = 50) =>
-    api.get<ApprovalQueueItem[]>('/automation/queue', { params: { status, limit } }).then((r) => r.data),
+    api.get<unknown>('/automation/queue', { params: { status, limit } }).then((r) => normalizeApprovalQueueResponse(r.data)),
   get: (id: string) =>
     api.get<ApprovalQueueItem>(`/automation/queue/${id}`).then((r) => r.data),
   approve: (id: string, note?: string) =>
@@ -239,7 +251,7 @@ export const emailAnalysisApi = {
   get: (shipmentId: string) =>
     api.get<EmailAnalysisResponse>(`/email-analysis/${shipmentId}`).then((r) => r.data),
   analyze: (shipmentId: string) =>
-    api.post(`/email-analysis/${shipmentId}/analyze`).then((r) => r.data),
+    api.post(`/email-analysis/${shipmentId}/analyze`, {}, { timeout: 120000 }).then((r) => r.data),
 };
 
 // CRM

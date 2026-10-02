@@ -37,35 +37,16 @@ export default function LoginPage() {
 const onSubmit = async (data: FormData) => {
   setLoading(true);
 
-  // 🔧 TEMP DEV BYPASS — REMOVE BEFORE PRODUCTION
-  if (data.email === 'admin@gmail.com' && data.password === 'admin') {
-    const mockToken = 'dev-bypass-token';
-    const mockUser = {
-      id: 'dev-admin',
-      email: 'admin@gmail.com',
-      full_name: 'Dev Admin',
-      role: 'admin',
-    } as any;
-
-    setToken(mockToken);                              // localStorage (for api-client)
-    document.cookie = `freightos_token=${mockToken}; path=/; SameSite=Lax`; // cookie (for middleware)
-    setAuth(mockToken, mockUser);
-    toast.success('Signed in (dev bypass)');
-    router.push('/dashboard');
-    setLoading(false);
-    return;
-  }
-  // 🔧 END TEMP DEV BYPASS
 
   try {
     const res = await authApi.login(data.email, data.password);
     setToken(res.access_token);
-    document.cookie = `freightos_token=${res.access_token}; path=/; SameSite=Lax`;
+    if (res.refresh_token) localStorage.setItem('freightos_refresh_token', res.refresh_token);
     setAuth(res.access_token, res.user);
     toast.success(`Welcome back, ${res.user.full_name?.split(' ')[0] || ''}`);
     router.push('/dashboard');
   } catch (err) {
-    const apiErr = toApiError(err as any);
+    const apiErr = toApiError(err);
     if (apiErr.fieldErrors) {
       for (const [field, msgs] of Object.entries(apiErr.fieldErrors)) {
         setError(field as keyof FormData, { message: msgs[0] });
@@ -93,23 +74,31 @@ const onSubmit = async (data: FormData) => {
           <p className="mt-1.5 text-[12px] text-[#858693]">Sign in to your operations workspace</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="rounded-[20px] border border-white/80 bg-white p-6 shadow-[0_22px_60px_rgba(82,78,137,0.12)]">
+        <form onSubmit={handleSubmit(onSubmit)} aria-busy={loading} className="rounded-[20px] border border-white/80 bg-white p-6 shadow-[0_22px_60px_rgba(82,78,137,0.12)]">
           <div className="mb-4">
-            <label className="mb-1.5 block text-[12px] font-semibold text-[#393945]">Email</label>
+            <label htmlFor="email" className="mb-1.5 block text-[12px] font-semibold text-[#393945]">Email</label>
             <input
               {...register('email')}
+              id="email"
+              autoComplete="username"
+              aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? 'email-error' : undefined}
               type="email"
               placeholder="you@freightops.in"
               className="w-full rounded-xl border border-[#e9e9ef] bg-white px-3.5 py-2.5 text-[13px] outline-none transition focus:border-[#746ad1] focus:ring-2 focus:ring-[#e8e5f7]"
             />
-            {errors.email && <p className="mt-1 text-[11px] text-[#d45166]">{errors.email.message}</p>}
+            {errors.email && <p id="email-error" role="alert" className="mt-1 text-[11px] text-[#d45166]">{errors.email.message}</p>}
           </div>
 
           <div className="mb-6">
-            <label className="mb-1.5 block text-[12px] font-semibold text-[#393945]">Password</label>
+            <label htmlFor="password" className="mb-1.5 block text-[12px] font-semibold text-[#393945]">Password</label>
             <div className="relative">
               <input
                 {...register('password')}
+                id="password"
+                autoComplete="current-password"
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? 'password-error' : undefined}
                 type={showPassword ? 'text' : 'password'}
                 placeholder="Enter your password"
                 className="w-full rounded-xl border border-[#e9e9ef] bg-white px-3.5 py-2.5 pr-10 text-[13px] outline-none transition focus:border-[#746ad1] focus:ring-2 focus:ring-[#e8e5f7]"
@@ -117,12 +106,14 @@ const onSubmit = async (data: FormData) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a0a0ab] hover:text-[#777884]"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            {errors.password && <p className="mt-1 text-[11px] text-[#d45166]">{errors.password.message}</p>}
+            {errors.password && <p id="password-error" role="alert" className="mt-1 text-[11px] text-[#d45166]">{errors.password.message}</p>}
           </div>
 
           <button

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Centralised mock dataset for FreightOS frontend.
  * Every object is typed against lib/types.ts and internally consistent.
@@ -38,6 +37,7 @@ export const mockUser: User = {
 };
 
 export const mockAuthResponse: AuthResponse = {
+  refresh_token: 'mock-refresh-token',
   access_token: 'mock-access-token-freightos',
   user: mockUser,
 };

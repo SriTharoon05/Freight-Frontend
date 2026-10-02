@@ -58,6 +58,7 @@ export default function EscalationsPage() {
   });
 
   useEffect(() => {
+    if (!supabase) return;
     const channel = supabase
       .channel('escalation_logs')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'escalation_logs' }, (payload) => {
@@ -67,7 +68,7 @@ export default function EscalationsPage() {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { supabase?.removeChannel(channel); };
   }, [queryClient]);
 
   return (

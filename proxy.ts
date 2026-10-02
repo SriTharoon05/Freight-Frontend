@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const publicPaths = ['/login'];
+  const publicPaths = ['/login', '/saas-admin'];
   const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (isPublic) {

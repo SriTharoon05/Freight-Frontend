@@ -49,13 +49,14 @@ export default function AssignmentManagerPage() {
   });
 
   useEffect(() => {
+    if (!supabase) return;
     const channel = supabase
       .channel('shipments-assignment-mgr')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'shipments' }, () => {
         queryClient.invalidateQueries({ queryKey: ['assignment-manager'] });
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { supabase?.removeChannel(channel); };
   }, [queryClient]);
 
   return (

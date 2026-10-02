@@ -1,4 +1,4 @@
-export type Role = 'ops_manager' | 'org_admin' | 'ops_agent' | 'readonly';
+export type Role = 'ops_manager' | 'org_admin' | 'ops_agent' | 'readonly' | 'sales' | 'ops' | 'finance' | 'admin' | 'manager';
 
 export interface User {
   id: string;
@@ -10,6 +10,7 @@ export interface User {
 }
 
 export interface AuthResponse {
+  refresh_token: string;
   access_token: string;
   user: User;
 }

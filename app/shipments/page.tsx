@@ -1,197 +1,200 @@
-'use client';
-
-import { useState, useMemo, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Search, Filter, Plus, Ship, Plane, Truck, Train, ChevronLeft, ChevronRight } from 'lucide-react';
-import { shipmentsApi } from '@/lib/api';
-import { queryKeys } from '@/lib/query-keys';
-import { AppShell } from '@/components/shell/app-shell';
-import { Card } from '@/components/shell/card';
-import { SectionTitle } from '@/components/shell/card';
-import { StatusBadge } from '@/components/shell/badges';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/shell/states';
-import type { Shipment, ShipmentStatus } from '@/lib/types';
-
-const MODE_ICONS: Record<string, typeof Ship> = {
-  ocean: Ship, air: Plane, road: Truck, rail: Train,
-};
-
-const STATUS_OPTIONS: { label: string; value: string }[] = [
-  { label: 'All statuses', value: '' },
-  { label: 'Draft', value: 'draft' },
-  { label: 'Booked', value: 'booked' },
-  { label: 'In transit', value: 'in_transit' },
-  { label: 'Delivered', value: 'delivered' },
-  { label: 'Exception', value: 'exception' },
-];
-
-const MODE_OPTIONS: { label: string; value: string }[] = [
-  { label: 'All modes', value: '' },
-  { label: 'Ocean', value: 'ocean' },
-  { label: 'Air', value: 'air' },
-  { label: 'Road', value: 'road' },
-  { label: 'Rail', value: 'rail' },
-];
-
-export default function ShipmentsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [mode, setMode] = useState('');
-  const [page, setPage] = useState(parseInt(searchParams.get('page') || '1'));
-  const limit = 20;
-
+"use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Search } from "lucide-react";
+import { AppShell } from "@/components/shell/app-shell";
+import {
+  Panel,
+  Pager,
+  ErrorBanner,
+  inputClass,
+  buttonClass,
+} from "@/components/freight/shared";
+import { freight, type Page, type Job, dateLabel } from "@/lib/freight";
+import { useAuthStore } from "@/lib/auth-store";
+export default function JobsPage() {
+  const assignedUserId = useSearchParams().get("assigned_user_id") || undefined;
+  const user = useAuthStore((s) => s.user),
+    [page, setPage] = useState(1),
+    [search, setSearch] = useState(""),
+    [query, setQuery] = useState(""),
+    [mode, setMode] = useState(""),
+    [status, setStatus] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    const t = setTimeout(() => {
+      setQuery(search);
+      setPage(1);
+    }, 250);
     return () => clearTimeout(t);
   }, [search]);
-
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (page > 1) params.set('page', String(page));
-    router.replace(`/shipments${params.toString() ? `?${params}` : ''}`);
-  }, [page, router]);
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: queryKeys.shipments({ page, limit, status, mode, search: debouncedSearch }),
-    queryFn: () => shipmentsApi.list({ page, limit, status: status || undefined, mode: mode || undefined, search: debouncedSearch || undefined }),
+  const result = useQuery<Page<Job>>({
+    queryKey: [
+      "freight",
+      user?.tenant_id,
+      "jobs",
+      page,
+      query,
+      mode,
+      status,
+      assignedUserId,
+    ],
+    queryFn: () =>
+      freight.get<Page<Job>>("/jobs", {
+        page,
+        search: query,
+        mode,
+        status,
+        assigned_user_id: assignedUserId,
+      }),
   });
-
-  const shipments = data?.items || [];
-  const total = data?.total || 0;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-
   return (
     <AppShell>
-      <SectionTitle
-        action={
-          <button
-            onClick={() => router.push('/shipments/new')}
-            className="flex items-center gap-2 rounded-xl bg-[#7068cf] px-3.5 py-2.5 text-[11px] font-semibold text-white shadow-[0_6px_14px_rgba(112,104,207,0.2)] transition hover:bg-[#6259c1]"
-          >
-            <Plus size={14} />New shipment
-          </button>
-        }
-      >
-        Shipments
-      </SectionTitle>
-
-      <Card className="mb-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="flex flex-1 items-center gap-2 rounded-lg border border-[#ededf2] px-3 py-2">
-            <Search size={15} className="text-[#9b9aa6]" />
-            <input
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Search ref, BL, container, customer…"
-              className="w-full bg-transparent text-[12px] outline-none placeholder:text-[#b0b0ba]"
-            />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+            <p className="mt-1 text-xs text-[#858693]">Shipment operations</p>
           </div>
-          <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded-lg border border-[#ededf2] bg-white px-3 py-2 text-[12px] font-medium text-[#686975] outline-none">
-            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <select value={mode} onChange={(e) => { setMode(e.target.value); setPage(1); }} className="rounded-lg border border-[#ededf2] bg-white px-3 py-2 text-[12px] font-medium text-[#686975] outline-none">
-            {MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <Link className={buttonClass} href="/shipments/new">
+            <Plus size={14} />
+            New job
+          </Link>
         </div>
-      </Card>
-
-      <Card>
-        {isLoading ? (
-          <TableSkeleton rows={8} cols={6} />
-        ) : isError ? (
-          <ErrorState message="Could not load shipments" onRetry={() => refetch()} />
-        ) : shipments.length === 0 ? (
-          <EmptyState
-            title="No shipments found"
-            message="Try adjusting your filters or create a new shipment to get started."
-            action={
-              <button onClick={() => router.push('/shipments/new')} className="rounded-lg bg-[#7068cf] px-4 py-2 text-[12px] font-semibold text-white">
-                New shipment
-              </button>
-            }
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-[#f0f0f4] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#a2a2ad]">
-                  <th className="pb-3 pl-1">Shipment</th>
-                  <th className="pb-3">Route</th>
-                  <th className="pb-3">Mode</th>
-                  <th className="pb-3">ETA</th>
-                  <th className="pb-3">Status</th>
-                  <th className="pb-3">Approvals</th>
+        <Panel title="Job register">
+          <div className="mb-5 grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+            <input
+              aria-label="Search jobs"
+              className={inputClass}
+              placeholder="Job, customer or master reference"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              aria-label="Mode"
+              className={inputClass}
+              value={mode}
+              onChange={(e) => {
+                setMode(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All modes</option>
+              {["ocean", "air", "road", "rail", "multimodal"].map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Status"
+              className={inputClass}
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All statuses</option>
+              {[
+                "booking_confirmed",
+                "in_transit",
+                "customs_import_pending",
+                "customs_import_cleared",
+                "delivered",
+                "closed",
+                "on_hold",
+                "cancelled",
+              ].map((s) => (
+                <option key={s} value={s}>
+                  {s.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ErrorBanner error={result.error} />
+          <div className="overflow-auto">
+            <table className="w-full whitespace-nowrap text-left text-xs">
+              <thead className="border-b text-[10px] uppercase tracking-wide text-[#858693]">
+                <tr>
+                  {[
+                    "Job / Customer",
+                    "Route",
+                    "Mode / Service",
+                    "ETD",
+                    "ETA",
+                    "Status",
+                    "D&D",
+                  ].map((h) => (
+                    <th className="px-3 py-3" key={h}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {shipments.map((s: Shipment) => {
-                  const ModeIcon = MODE_ICONS[s.transport_mode] || Ship;
-                  return (
-                    <tr
-                      key={s.id}
-                      className="group cursor-pointer border-b border-[#f4f4f7] last:border-0"
-                      onClick={() => router.push(`/shipments/${s.id}`)}
-                    >
-                      <td className="py-3.5 pl-1">
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0effd] text-[#756bd1]">
-                            <ModeIcon size={15} />
-                          </span>
-                          <div>
-                            <p className="text-[12px] font-semibold text-[#373743]">{s.ref_number}</p>
-                            <p className="mt-0.5 text-[10px] text-[#999aa6]">{s.shipper_name || '—'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3.5 text-[11px] text-[#626370]">{s.origin} → {s.destination}</td>
-                      <td className="py-3.5 text-[11px] text-[#777884] capitalize">{s.transport_mode}</td>
-                      <td className="py-3.5 text-[11px] text-[#777884]">{s.eta ? new Date(s.eta).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                      <td className="py-3.5"><StatusBadge status={s.status} /></td>
-                      <td className="py-3.5">
-                        {s.has_pending_approvals ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-[#fff7e7] px-2 py-1 text-[10px] font-semibold text-[#b77912]">
-                            <span className="h-1.5 w-1.5 rounded-full bg-[#d99a35]" />Pending
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-[#c0c0c8]">—</span>
+                {result.data?.items.map((job: Job) => (
+                  <tr
+                    key={job.id}
+                    className="border-b border-[#f1eff6] hover:bg-[#faf9ff]"
+                  >
+                    <td className="px-3 py-4">
+                      <Link
+                        className="font-semibold text-[#7068cf]"
+                        href={`/shipments/${job.id}`}
+                      >
+                        {job.ref_number}
+                      </Link>
+                      <p className="mt-1 text-[10px] text-[#858693]">
+                        {job.customer_name}
+                        {job.assigned_name && (
+                          <span className="block">{job.assigned_name}</span>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </p>
+                    </td>
+                    <td className="px-3">
+                      {job.origin} → {job.destination}
+                    </td>
+                    <td className="px-3 capitalize">
+                      {job.transport_mode}
+                      <p className="text-[10px] text-[#858693]">
+                        {job.service_type}
+                      </p>
+                    </td>
+                    <td className="px-3">{dateLabel(job.etd)}</td>
+                    <td className="px-3">{dateLabel(job.eta)}</td>
+                    <td className="px-3">
+                      <span className="rounded-full bg-[#f0effc] px-2 py-1 text-[10px] text-[#7068cf]">
+                        {job.status.replaceAll("_", " ")}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3 text-[10px] ${["overdue", "critical"].includes(job.dd_risk) ? "font-semibold text-red-600" : "text-[#858693]"}`}
+                    >
+                      {job.dd_risk}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
+            {result.isLoading && (
+              <p className="p-8 text-center text-xs text-[#858693]">
+                Loading jobs…
+              </p>
+            )}
+            {result.data?.total === 0 && (
+              <p className="p-8 text-center text-xs text-[#858693]">
+                No jobs match these filters.
+              </p>
+            )}
           </div>
-        )}
-
-        {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between border-t border-[#f0f0f4] pt-4">
-            <p className="text-[11px] text-[#9899a5]">
-              Page {page} of {totalPages} · {total} shipments
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="rounded-lg border border-[#e9e9ef] p-2 text-[#777884] disabled:opacity-40 hover:bg-[#f7f7fa]"
-              >
-                <ChevronLeft size={15} />
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="rounded-lg border border-[#e9e9ef] p-2 text-[#777884] disabled:opacity-40 hover:bg-[#f7f7fa]"
-              >
-                <ChevronRight size={15} />
-              </button>
-            </div>
-          </div>
-        )}
-      </Card>
+          <Pager
+            page={page}
+            total={result.data?.total || 0}
+            limit={20}
+            onChange={setPage}
+          />
+        </Panel>
+      </div>
     </AppShell>
   );
 }
