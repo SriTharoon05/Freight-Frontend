@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Package,
   Inbox,
+  Mail,
   Settings2,
   FileText,
   Gauge,
@@ -17,13 +18,16 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-const groups = [
+export const navigationGroups = [
   {
     label: "Workspace",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { label: "RFQ & Quoting", href: "/rfqs", icon: Inbox },
+      { label: "Other emails", href: "/emails", icon: Mail },
       { label: "Jobs", href: "/shipments", icon: Package },
+      { label: "Milestones", href: "/milestones", icon: Clock },
+      { label: "Partners", href: "/partners", icon: BookUser },
       { label: "Documents", href: "/documents", icon: FileText },
     ],
   },
@@ -87,7 +91,7 @@ export function Sidebar() {
         {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}{" "}
         {!collapsed && "Collapse"}
       </button>
-      {groups.map((group) => (
+      {navigationGroups.map((group) => (
         <div key={group.label} className="mb-6">
           {!collapsed && (
             <div className="mb-2 px-3 text-[9px] font-bold uppercase tracking-widest text-[#aaa7ba]">

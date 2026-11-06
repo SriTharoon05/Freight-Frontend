@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Mail, Phone, MapPin, Building2 } from 'lucide-react';
 import { customersApi } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -13,7 +13,8 @@ import { formatINR } from '@/lib/format';
 
 import type { Shipment } from '@/lib/types';
 
-export default function CustomerDetailPage({ params }: { params: { id: string } }) {
+export default function CustomerDetailPage() {
+  const params = useParams<{ id: string }>();
   const router = useRouter();
 
   const { data: customer, isLoading, isError, refetch } = useQuery({

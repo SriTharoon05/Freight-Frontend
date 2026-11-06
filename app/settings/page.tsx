@@ -36,6 +36,7 @@ const groups: Record<string, string[]> = {
     "default_payment_terms",
     "signature",
   ],
+  "Quotation Defaults": ["quotation_terms_and_conditions"],
   "Outlook Integration": ["outlook_read_url", "polling_seconds"],
   Notifications: [
     "escalation_minutes",
@@ -133,9 +134,10 @@ export default function SettingsPage() {
                     "bank_details",
                     "signature",
                     "handling",
+                    "quotation_terms_and_conditions",
                   ].includes(key) ? (
                     <textarea
-                      rows={4}
+                      rows={key === "quotation_terms_and_conditions" ? 7 : 4}
                       disabled={!admin}
                       className={inputClass}
                       value={form[key] || ""}
@@ -203,7 +205,7 @@ export default function SettingsPage() {
                 >
                   <span className="font-semibold">{c.name}</span>
                   <span>
-                    {c.calculation} Â· {c.default_value} {c.currency}
+                    {c.calculation} - {c.default_value} {c.currency}
                   </span>
                   {admin && (
                     <button

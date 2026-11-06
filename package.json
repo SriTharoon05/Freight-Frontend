@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-demo.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint app components lib --ext .ts,.tsx",
-    "test": "node --test tests/api-client.test.cjs",
+    "test": "node --test tests/api-client.test.cjs tests/mailbox-settings.test.cjs tests/mailbox-schedule.test.cjs tests/rfq-workspace.test.cjs tests/milestone-board.test.cjs tests/deployment-entrypoint.test.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

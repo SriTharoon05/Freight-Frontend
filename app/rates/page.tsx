@@ -15,6 +15,7 @@ import { formatISTDate } from '@/lib/date';
 import { useAuthStore } from '@/lib/auth-store';
 import { toApiError } from '@/lib/api-client';
 import type { RateCard } from '@/lib/types';
+import { EmailRateCards } from '@/components/freight/email-rate-cards';
 
 export default function RatesPage() {
   const queryClient = useQueryClient();
@@ -25,8 +26,8 @@ export default function RatesPage() {
   const [creating, setCreating] = useState(false);
 
   const { data: rates, isLoading, isError, refetch } = useQuery({
-    queryKey: queryKeys.rateCards({ mode: modeFilter, active: !showInactive }),
-    queryFn: () => ratesApi.list({ mode: modeFilter || undefined, active: !showInactive }),
+    queryKey: queryKeys.rateCards({ mode: modeFilter, active: showInactive ? undefined : true }),
+    queryFn: () => ratesApi.list({ mode: modeFilter || undefined, active: showInactive ? undefined : true }),
   });
 
   const deleteMutation = useMutation({
@@ -42,6 +43,7 @@ export default function RatesPage() {
 
   return (
     <AppShell>
+      <div className="mb-5"><EmailRateCards /></div>
       <SectionTitle
         action={
           canEdit && (
@@ -59,7 +61,7 @@ export default function RatesPage() {
 
       <Card className="mb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} className="rounded-lg border border-[#ededf2] bg-white px-3 py-2 text-[12px] font-medium text-[#686975] outline-none">
+          <select aria-label="Transport mode" value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} className="rounded-lg border border-[#ededf2] bg-white px-3 py-2 text-[12px] font-medium text-[#686975] outline-none">
             <option value="">All modes</option>
             <option value="ocean">Ocean</option>
             <option value="air">Air</option>

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/shell/app-shell";
 import {
   Panel,
@@ -17,8 +17,12 @@ import {
   moneyLabel,
 } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
+import { MilestoneBoard } from "@/components/freight/milestone-board";
 type Row = Record<string, any>;
 export default function DashboardPage() {
+  const client = useQueryClient();
+  const [attentionError, setAttentionError] = useState<unknown>(null);
+  const [acknowledging, setAcknowledging] = useState("");
   const user = useAuthStore((s) => s.user),
     [view, setView] = useState("Operations"),
     [kind, setKind] = useState("departures"),
@@ -61,6 +65,17 @@ export default function DashboardPage() {
             )}
           </p>
         </div>
+        <ErrorBanner error={attentionError} />
+        {view === "Operations" && <MilestoneBoard compact />}
+        <Panel title={`Critical correspondence · ${data?.critical_mail_count ?? 0} needs attention`}>
+          {!data?.critical_mail?.length && <p className="text-xs text-[#777884]">No unacknowledged critical correspondence.</p>}
+          <div className="space-y-3">{data?.critical_mail?.map((mail: Row) => <article key={mail.id} className="rounded-xl border border-red-200 bg-red-50 p-4"><Link href={mail.href} className="text-sm font-semibold text-red-800">{mail.subject || "(No subject)"}</Link><p className="mt-1 text-xs text-red-700">{mail.sender} · {dateLabel(mail.received_at)} · {mail.category?.replaceAll("_", " ")}</p><ul className="mt-2 list-disc pl-4 text-xs text-red-900">{(mail.summary_bullets?.length ? mail.summary_bullets : [mail.reason]).map((text: string, index: number) => <li key={index}>{text}</li>)}</ul><button className={`${secondaryClass} mt-3`} disabled={!!acknowledging} onClick={async () => { setAcknowledging(mail.id); setAttentionError(null); try { await freight.post(`/mail-attention/${mail.id}/acknowledge`, {}); await client.invalidateQueries({queryKey: ["freight", user?.tenant_id, "dashboard"]}); } catch (error) { setAttentionError(error); } finally { setAcknowledging(""); } }}>Acknowledge review</button></article>)}</div>
+          {!!data?.critical_mail_count && <p className="mt-3 text-xs text-[#777884]">Acknowledgment records your review. A later critical email appears again. Showing the latest 10.</p>}
+        </Panel>
+        <Panel title="Correspondence and job preparation">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[["Customer RFQs", data?.mail_pipeline?.rfq, "/rfqs"], ["Potential jobs", data?.mail_pipeline?.potential, "/rfqs?tab=potential"], ["Jobs to create", data?.mail_pipeline?.ready, "/rfqs?tab=ready"], ["Carrier / agent replies", data?.mail_pipeline?.supplier_rates, "/emails?workflow=supplier_rates"], ["Saved job forms · Draft", data?.saved_drafts, "/shipments?status=draft"], ["Procurement flagged", data?.rfq_stages?.no_rate, "/rfqs?tab=prepared&status=no_rate"]].map(([label, count, href]) => <Link key={label} href={String(href)} className="rounded-xl bg-[#f7f6fb] p-3"><strong className="text-xl text-[#7068cf]">{count ?? 0}</strong><p className="mt-1 text-xs">{label}</p></Link>)}</div>
+        </Panel>
+        {(!!data?.mail_connection_errors?.length || !!data?.analysis_states?.rules_fallback) && <Panel title="Mailbox processing needs attention"><p className="text-xs text-amber-900">{data?.analysis_states?.rules_fallback || 0} messages use fallback classification after an analysis error. Retries are bounded; ambiguous messages need review.</p>{data?.mail_connection_errors?.map((box: Row) => <p key={box.address} className="mt-2 text-xs">{box.address}: {box.error} · Retry {dateLabel(box.retry_at)}</p>)}<Link className="mt-2 block text-xs text-[#7068cf]" href="/settings">View connection and sync state</Link></Panel>}
         <nav className="flex gap-2">
           {[
             "Operations",
@@ -71,6 +86,7 @@ export default function DashboardPage() {
             <button
               key={t}
               className={`${secondaryClass} ${t === view ? "!border-[#7068cf] !bg-[#f4f2ff] !text-[#7068cf]" : ""}`}
+              aria-pressed={t === view}
               onClick={() => setView(t)}
             >
               {t}
@@ -151,6 +167,7 @@ export default function DashboardPage() {
                   <button
                     key={k}
                     className={`${secondaryClass} ${kind === k ? "!text-[#7068cf] !bg-[#f4f2ff]" : ""}`}
+                    aria-pressed={kind === k}
                     onClick={() => {
                       setKind(k);
                       setPage(1);
@@ -218,6 +235,7 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {watch.data?.total === 0 && <p className="p-5 text-xs text-[#858693]">No shipments match this watch filter.</p>}
               <Pager
                 page={page}
                 total={watch.data?.total || 0}
@@ -238,13 +256,13 @@ export default function DashboardPage() {
               }
             >
               <div className="grid gap-4 md:grid-cols-5">
-                {["new", "quoted", "won", "lost", "no_rate"].map((stage) => (
+                {["new", "quote_draft", "quoted", "accepted", "won", "lost", "no_rate"].map((stage) => (
                   <div key={stage} className="rounded-xl bg-[#f4f2ff] p-5">
                     <strong className="text-2xl text-[#7068cf]">
                       {data?.rfq_stages?.[stage] || 0}
                     </strong>
                     <p className="mt-2 text-xs capitalize">
-                      {stage.replace("_", " ")}
+                      {stage === "quote_draft" ? "Quote draft saved" : stage === "accepted" ? "Jobs to create" : stage === "won" ? "Job created" : stage.replace("_", " ")}
                     </p>
                   </div>
                 ))}
@@ -427,7 +445,7 @@ export default function DashboardPage() {
                     <span>{p.departing_48h} ETD ≤48h</span>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {Object.entries(p.by_status).map(([status, count]) => (
+                    {Object.entries(p.by_status || {}).map(([status, count]) => (
                       <span
                         key={status}
                         className="rounded-full bg-[#f4f2ff] px-2 py-1 text-[10px]"

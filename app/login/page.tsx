@@ -71,10 +71,10 @@ const onSubmit = async (data: FormData) => {
           <h1 className="font-display text-[24px] font-semibold tracking-[-0.04em] text-[#171725]">
             Freight<span className="text-[#7770d4]">OS</span>
           </h1>
-          <p className="mt-1.5 text-[12px] text-[#858693]">Sign in to your operations workspace</p>
+          <p className="mt-1.5 text-[12px] text-[#858693]">FGL Logistics · Live operations</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} aria-busy={loading} className="rounded-[20px] border border-white/80 bg-white p-6 shadow-[0_22px_60px_rgba(82,78,137,0.12)]">
+        <form method="post" onSubmit={handleSubmit(onSubmit)} aria-busy={loading} className="rounded-[20px] border border-white/80 bg-white p-6 shadow-[0_22px_60px_rgba(82,78,137,0.12)]">
           <div className="mb-4">
             <label htmlFor="email" className="mb-1.5 block text-[12px] font-semibold text-[#393945]">Email</label>
             <input
@@ -125,6 +125,16 @@ const onSubmit = async (data: FormData) => {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+
+        <a href="/demo/index.html?view=both" className="mt-4 block rounded-[20px] border border-[#d9d4f3] bg-[#f5f3ff] p-5 text-left transition hover:border-[#7068cf]">
+          <span className="block text-[13px] font-semibold text-[#554bac]">Demo login · Meridian Logistics</span>
+          <span className="mt-1 block text-[12px] leading-5 text-[#777884]">Explore the staff workspace and partner app side by side with fictional test data. No password needed.</span>
+        </a>
+
+        <a href="https://freight-partners-api.onrender.com/v1/partners/" className="mt-3 block rounded-[20px] border border-[#d9d4f3] bg-white p-5 text-left transition hover:border-[#7068cf]">
+          <span className="block text-[13px] font-semibold text-[#554bac]">Freight Partners · Web app</span>
+          <span className="mt-1 block text-[12px] leading-5 text-[#777884]">Sign in with Google to manage assigned tasks, drivers, warehouse requests and your Inbox.</span>
+        </a>
 
         <p className="mt-6 text-center text-[11px] text-[#a0a0ac]">
           Freight operations platform · Internal use only

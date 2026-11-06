@@ -18,6 +18,9 @@ import {
 } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
 import { AuditPanel } from "./audit-panel";
+import { PartnerAssignments } from "./partner-assignments";
+import { PartnerWarehouseRequests } from "./partner-warehouse-requests";
+import { MilestoneBoard } from "./milestone-board";
 import {
   EntityAutocomplete,
   ChargeSelect,
@@ -36,6 +39,8 @@ const tabs = [
   "Audit",
   "Documents",
   "Milestones",
+  "Assignments",
+  "Warehouse Requests",
   "Emails",
   "Activity Log",
 ];
@@ -87,8 +92,12 @@ export function JobDetail({ id }: { id: string }) {
           <p className="mt-1 text-sm text-[#858693]">
             {data.customer_name} · {data.origin} → {data.destination}
           </p>
+          <p className="mt-2 text-xs text-[#777884]">Created by: {data.created_by?.name || "Not recorded"} · Last edited by: {data.last_edited_by?.name || "Not recorded"}</p>
         </div>
         <div className="flex gap-5">
+          {data.version && !["finance", "customer"].includes(user?.role || "") && (
+            <Link className={secondaryClass} href={`/shipments/new?edit=${id}`}>Edit job</Link>
+          )}
           <div>
             <span className="text-[10px] font-bold text-[#858693]">ETD</span>
             <p className="text-xs font-semibold">{dateLabel(data.etd)}</p>
@@ -257,6 +266,8 @@ export function JobDetail({ id }: { id: string }) {
       {tab === "Milestones" && <Milestones id={id} />}{" "}
       {tab === "Emails" && <Emails id={id} job={data} />}{" "}
       {tab === "Activity Log" && <Activity id={id} />}
+      {tab === "Assignments" && <PartnerAssignments job={data} />}
+      {tab === "Warehouse Requests" && <PartnerWarehouseRequests job={data} />}
     </div>
   );
 }
@@ -680,6 +691,11 @@ function Documents({ id }: { id: string }) {
                 "packing_list",
                 "arrival_notice",
                 "delivery_order",
+                "commercial_invoice",
+                "pickup_receipt",
+                "warehouse_receipt",
+                "shipping_bill",
+                "proof_of_delivery",
               ].map((t) => (
                 <option key={t} value={t}>
                   {t.replaceAll("_", " ").toUpperCase()}
@@ -695,7 +711,7 @@ function Documents({ id }: { id: string }) {
                 )
               }
             >
-              <Plus size={14} />
+              <Plus size={14} /><span className="sr-only">Generate document</span>
             </button>
           </div>
         }
@@ -714,6 +730,7 @@ function Documents({ id }: { id: string }) {
                 <p className="mt-1 text-[10px] capitalize text-[#858693]">
                   {doc.document_type.replaceAll("_", " ")} · {doc.status}
                 </p>
+                <p className="mt-1 text-[10px] text-[#777884]">Created by: {doc.metadata_?.created_by?.name || "Not recorded"} · Last edited by: {doc.metadata_?.last_edited_by?.name || "Not recorded"}</p>
               </div>
               <div className="flex gap-2">
                 <button className={secondaryClass} onClick={() => preview(doc)}>
@@ -988,55 +1005,58 @@ function Documents({ id }: { id: string }) {
   );
 }
 function Milestones({ id }: { id: string }) {
+  return <div className="space-y-4"><MilestoneBoard jobId={id} /><details className="rounded-2xl border border-[#eeecf5] p-4"><summary className="cursor-pointer text-xs font-semibold">Timeline and customer email history</summary><div className="mt-4"><MilestoneHistory id={id} /></div></details></div>;
+}
+function MilestoneHistory({ id }: { id: string }) {
   const list = useList(id, "milestones"),
     action = useAction(),
     [edit, setEdit] = useState<Row | null>(null);
-  const values = list.data?.items || [],
-    current = values.reduce(
-      (last: number, m: Row, i: number) => (m.occurred_at ? i + 1 : last),
-      0,
-    );
+  const values: Row[] = list.data?.items || [];
+  const steps: Row[] = values.flatMap((phase: Row) => phase.children?.length ? phase.children : [phase]);
+  const completed = steps.filter((step: Row) => step.occurred_at).length;
+  const firstOpen = values.findIndex((phase: Row) => !phase.occurred_at);
+  const editItem = (item: Row) => setEdit({
+    ...item, planned_at: localDateInput(item.planned_at),
+    actual_at: localDateInput(item.occurred_at), notes: item.description || "",
+  });
+  const status = (item: Row) => item.occurred_at ? "Completed" : item.planned_at && new Date(item.planned_at) < new Date() ? "Overdue" : item.status === "in_progress" ? "In progress" : "Pending";
+  const badge = (item: Row) => status(item) === "Completed" ? "bg-emerald-50 text-emerald-700" : status(item) === "Overdue" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800";
   return (
     <Panel title="Shipment milestones">
       <ErrorBanner error={list.error || action.error} />
-      <div className="mb-5 flex gap-8 text-xs">
-        <span>
-          ETD <strong>{dateLabel(list.data?.etd)}</strong>
-        </span>
-        <span>
-          ETA <strong>{dateLabel(list.data?.eta)}</strong>
-        </span>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4 text-xs">
+        <div className="flex gap-6"><span>ETD <strong>{dateLabel(list.data?.etd)}</strong></span><span>ETA <strong>{dateLabel(list.data?.eta)}</strong></span></div>
+        <strong className="text-[#7068cf]">{completed} of {steps.length} steps completed</strong>
       </div>
-      <div className="flex overflow-x-auto py-6">
-        {values.map((m: Row, i: number) => {
-          const overdue =
-            !m.occurred_at &&
-            m.planned_at &&
-            new Date(m.planned_at) < new Date();
-          return (
-            <button
-              key={m.id}
-              className="relative w-40 shrink-0 px-3 text-left"
-              onClick={() =>
-                setEdit({
-                  ...m,
-                  planned_at: localDateInput(m.planned_at),
-                  actual_at: localDateInput(m.occurred_at),
-                  notes: m.description || "",
-                })
-              }
-            >
-              <div className="absolute left-6 right-0 top-2 h-px bg-[#e5e3ee]" />
-              <div
-                className={`relative mb-3 h-4 w-4 rounded-full border-2 ${m.occurred_at ? "border-emerald-500 bg-emerald-500" : overdue ? "border-red-500 bg-red-500" : i === current ? "animate-pulse border-amber-400 bg-amber-400" : "border-[#cbc8da] bg-white"}`}
-              />
-              <strong className="block text-[11px]">{m.event_type}</strong>
-              <span className="mt-2 block text-[10px] text-[#858693]">
-                {dateLabel(m.occurred_at || m.planned_at)}
-              </span>
-            </button>
-          );
-        })}
+      <div className="mb-5 h-2 overflow-hidden rounded-full bg-[#eeecf5]" role="progressbar" aria-label="Shipment milestone completion" aria-valuemin={0} aria-valuemax={steps.length || 1} aria-valuenow={completed}>
+        <div className="h-full rounded-full bg-[#7068cf]" style={{width: steps.length ? (completed / steps.length * 100) + "%" : "0%"}} />
+      </div>
+      <div className="space-y-3">
+        {values.map((phase: Row, index: number) => (
+          <details key={phase.id} open={index === firstOpen} className="rounded-xl border border-[#e5e3ee] bg-white">
+            <summary className="cursor-pointer p-4 text-xs">
+              <span className="ml-2 font-semibold">{index + 1}. {phase.event_type}</span>
+              <span className={"ml-3 rounded-full px-2 py-1 text-[10px] font-semibold " + badge(phase)}>{status(phase)}</span>
+              {!!phase.children?.length && <span className="ml-3 text-[10px] text-[#858693]">{phase.children.filter((step: Row) => step.occurred_at).length}/{phase.children.length} steps</span>}
+            </summary>
+            <div className="border-t border-[#eeecf5] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                <div><p className="text-[#777884]">{phase.owner && phase.owner + " · "}Planned {dateLabel(phase.planned_at)}{phase.occurred_at && " · Occurred at: " + dateLabel(phase.occurred_at)}</p><MilestoneRecorded item={phase} /></div>
+                {!phase.metadata_?.partner_task_id && <button className={secondaryClass} onClick={() => editItem(phase)}>Edit milestone</button>}
+              </div>
+              {phase.description && <p className="mb-3 text-xs text-[#777884]">{phase.description}</p>}
+              {!!phase.children?.length && <ol className="divide-y divide-[#eeecf5]">
+                {phase.children.map((step: Row) => <li key={step.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
+                  <div className="flex min-w-0 gap-3"><span className={"mt-1 h-2.5 w-2.5 shrink-0 rounded-full " + (step.occurred_at ? "bg-emerald-500" : status(step) === "Overdue" ? "bg-red-500" : "bg-[#cbc8da]")} />
+                    <div><strong className="text-xs">{step.event_type}</strong><p className="mt-1 text-[10px] text-[#858693]">Planned {dateLabel(step.planned_at)}{step.occurred_at && " · Occurred at: " + dateLabel(step.occurred_at)}</p><MilestoneRecorded item={step} />{step.description && <p className="mt-1 text-xs text-[#777884]">{step.description}</p>}</div>
+                  </div>
+                  <div className="flex items-center gap-2"><span className={"rounded-full px-2 py-1 text-[10px] " + badge(step)}>{status(step)}</span><button className={secondaryClass} aria-label={"Edit " + step.event_type} onClick={() => editItem(step)}>Edit step</button></div>
+                </li>)}
+              </ol>}
+            </div>
+          </details>
+        ))}
+        {!values.length && <p className="py-5 text-xs text-[#858693]">No shipment milestones have been recorded.</p>}
       </div>
       {edit && (
         <form
@@ -1086,6 +1106,14 @@ function Milestones({ id }: { id: string }) {
       )}
     </Panel>
   );
+}
+function MilestoneRecorded({ item }: { item: Row }) {
+  const alerts = item.metadata_?.customer_alerts;
+  return <div className="mt-1 text-[10px] text-[#858693]">
+    <p>Created: {dateLabel(item.created_at)}{item.occurred_at && ` · Recorded at: ${dateLabel(item.metadata_?.actual_recorded_at || item.created_at)}`}</p>
+    {item.customer_alert_deliveries?.length ? item.customer_alert_deliveries.map((delivery: Row, index: number) => <p key={index}>Email to {delivery.roles.join(" / ")}: {delivery.status === "accepted" ? "Accepted by mail service" : delivery.status === "unknown" ? "Outcome uncertain — check Sent Items" : delivery.status.replaceAll("_", " ")}</p>) : !!alerts?.queued?.length && <p>Email alerts queued: {alerts.queued.join(", ")}</p>}
+    {!!alerts?.missing_email?.length && <p className="text-amber-700">Add an email address for: {alerts.missing_email.join(", ")}</p>}
+  </div>;
 }
 function Emails({ id, job }: { id: string; job: Job }) {
   const [page, setPage] = useState(1),

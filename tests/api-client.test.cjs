@@ -17,6 +17,19 @@ function compile(file, requireModule, globals = {}) {
 }
 
 const { toApiError } = compile('lib/api-errors.ts', require);
+const { retryRead } = compile('lib/query-policy.ts', require);
+
+test('only temporary read failures receive bounded retries', () => {
+  for (const status of [0, 408, 429, 500, 502, 503, 504]) {
+    assert.equal(retryRead(0, { status }), true);
+    assert.equal(retryRead(1, { status }), true);
+    assert.equal(retryRead(2, { status }), false);
+  }
+  for (const status of [400, 401, 403, 404, 409, 422, -1]) {
+    assert.equal(retryRead(0, { status }), false);
+  }
+  assert.equal(retryRead(0, { code: 'ERR_CANCELED' }), false);
+});
 
 test('normalized API errors retain status and field validation when handled twice', () => {
   const error = toApiError({ response: { status: 422, data: { detail: [{ loc: ['body', 'email'], msg: 'Invalid email' }] } } });
@@ -59,6 +72,36 @@ function harness(refresh) {
   };
   return { ...module, storage, window, document, refreshCalls: () => refreshCalls };
 }
+
+test('ordinary reads tolerate cold starts without extending write or explicit timeouts', async () => {
+  const client = harness(async () => { throw new Error('Refresh should not run'); });
+  const requests = [];
+  client.api.defaults.adapter = async config => {
+    requests.push({ method: config.method, timeout: config.timeout });
+    return { status: 200, statusText: 'OK', data: {}, headers: {}, config };
+  };
+  await client.api.get('/freight/rfqs');
+  await client.api.post('/freight/rfqs', {});
+  await client.api.get('/freight/rfqs', { timeout: 5000 });
+  assert.deepEqual(requests, [
+    { method: 'get', timeout: 90000 }, { method: 'post', timeout: 30000 },
+    { method: 'get', timeout: 5000 },
+  ]);
+});
+
+test('obsolete filter requests can be canceled through the freight client', async () => {
+  const client = harness(async () => { throw new Error('Refresh should not run'); });
+  const freight = compile('lib/freight.ts', name => {
+    if (name === './api-client') return { api: client.api };
+    return require(name);
+  }).freight;
+  const controller = new AbortController();
+  controller.abort();
+  let attempts = 0;
+  client.api.defaults.adapter = async () => { attempts++; return { data: {} }; };
+  await assert.rejects(freight.get('/email-requests', { status: 'pending' }, controller.signal));
+  assert.equal(attempts, 0);
+});
 
 test('parallel expired requests share one refresh and retry with the new token', async () => {
   const client = harness(async (_, __, config) => {
@@ -105,4 +148,55 @@ test('legacy paginated responses expose records to screens expecting items', asy
   const response = await client.api.get('/customers');
   assert.equal(response.data.items[0].id, 'customer-one');
   assert.equal(response.data.total, 1);
+});
+
+test('mailbox connection timeout tells users to check the result without replaying the POST', async () => {
+  const client = harness(async () => { throw new Error('Refresh should not run'); });
+  let requests = 0;
+  client.api.defaults.adapter = async (config) => {
+    requests++;
+    throw new axios.AxiosError('timeout', 'ECONNABORTED', config, {});
+  };
+  await assert.rejects(
+    client.api.post('/integrations/outlook/mailboxes', { address: 'inbox@example.com' }),
+    (error) => error.status === 0 && /Refresh the inbox list/.test(error.message),
+  );
+  assert.equal(requests, 1);
+  assert.equal(client.refreshCalls(), 0);
+  assert.equal(client.storage.get('freightos_token'), 'expired');
+});
+
+test('reading the inbox list has the generic timeout message', () => {
+  const error = toApiError({
+    code: 'ETIMEDOUT',
+    config: { method: 'get', url: '/integrations/outlook/mailboxes' },
+  });
+  assert.match(error.message, /request timed out/);
+  assert.doesNotMatch(error.message, /already be connected|still be starting/);
+});
+
+test('actual Axios HTTP errors show the backend explanation despite their top-level status', () => {
+  const config = { method: 'post', url: '/integrations/outlook/mailboxes' };
+  const response = {
+    status: 422, statusText: 'Unprocessable Entity', config, headers: {},
+    data: { detail: 'Microsoft could not authorize this inbox.' },
+  };
+  const raw = new axios.AxiosError('Request failed with status code 422', 'ERR_BAD_REQUEST', config, {}, response);
+  assert.equal(raw.status, 422);
+  const error = toApiError(raw);
+  assert.equal(error.message, response.data.detail);
+  assert.equal(error.status, 422);
+  assert.equal(toApiError(error), error);
+});
+
+test('actual Axios validation errors retain the rejected field and its explanation', () => {
+  const config = { method: 'post', url: '/integrations/outlook/mailboxes' };
+  const response = {
+    status: 422, statusText: 'Unprocessable Entity', config, headers: {},
+    data: { detail: [{ loc: ['body', 'sync_from'], msg: 'Import start cannot be in the future' }] },
+  };
+  const raw = new axios.AxiosError('Request failed with status code 422', 'ERR_BAD_REQUEST', config, {}, response);
+  const error = toApiError(raw);
+  assert.match(error.message, /sync_from: Import start cannot be in the future/);
+  assert.equal(error.fieldErrors.sync_from[0], 'Import start cannot be in the future');
 });

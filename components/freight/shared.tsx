@@ -80,8 +80,8 @@ export function Pager({
   onChange: (n: number) => void;
 }) {
   return (
-    <div className="mt-4 flex items-center justify-between text-xs text-[#858693]">
-      <span>{total} records</span>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[#858693]">
+      <span>{total.toLocaleString()} {total === 1 ? "record" : "records"}</span>
       <div className="flex items-center gap-3">
         <button
           className={secondaryClass}
@@ -176,9 +176,10 @@ export function EntityAutocomplete({
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const selectedName = value?.name;
   useEffect(() => {
-    if (value) setSearch(value.name);
-  }, [value?.id, value?.name]);
+    if (selectedName !== undefined) setSearch(selectedName);
+  }, [value?.id, selectedName]);
   useEffect(() => {
     const t = setTimeout(() => {
       setQuery(search.trim());

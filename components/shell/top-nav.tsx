@@ -11,6 +11,7 @@ import { setToken } from '@/lib/api-client';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { freight, type Page } from '@/lib/freight';
+import { MobileNavigation } from './mobile-navigation';
 
 export function TopNav() {
   const { user } = useAuthStore();
@@ -41,13 +42,16 @@ export function TopNav() {
 
   return (
     <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#e2def2] bg-[#f4f2ff] px-5 sm:px-8">
-      <div>
-        <p className="font-display text-[18px] font-semibold tracking-[-0.03em]">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <MobileNavigation />
+        <div className="min-w-0">
+        <p className="truncate font-display text-sm font-semibold tracking-[-0.03em] sm:text-[18px]">
           {greeting()}, {user?.full_name?.split(' ')[0] || 'there'}
         </p>
-        <p className="mt-0.5 text-[11px] text-[#9798a4]">
+        <p className="mt-0.5 hidden text-[11px] text-[#9798a4] sm:block">
           {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">

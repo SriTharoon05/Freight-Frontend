@@ -1,15 +1,22 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Save } from "lucide-react";
 import {
   freight,
   blankCargo,
+  blankDimensionItem,
+  calcDimensionItem,
+  formatDimensions,
+  parseDimensionsString,
   mawbWarning,
+  localDateInput,
+  type Job,
   type Entity,
   type EntityKind,
   type Cargo,
+  type DimensionItem,
 } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
 import {
@@ -33,8 +40,13 @@ const services: Record<string, string> = {
 export function JobForm() {
   const user = useAuthStore((s) => s.user),
     router = useRouter();
-  const rfqId = useSearchParams().get("rfq");
-  const draft = useDraft("new-job:" + (rfqId || ""), {
+  const params = useSearchParams();
+  const editId = params.get("edit");
+  const savedId = params.get("draft");
+  const requestedRfqId = params.get("rfq");
+  const requestedConversationId = params.get("conversation");
+  const client = useQueryClient();
+  const draft = useDraft("new-job:" + (editId || savedId || requestedConversationId || requestedRfqId || ""), {
     fields: {
       mode: "air",
       service_type: "Air Freight",
@@ -47,6 +59,9 @@ export function JobForm() {
       declared_customs: "NCV",
       insurance: "XXX",
       execution_date: new Date().toISOString().slice(0, 10),
+      bl_type: "original",
+      total_chargeable_weight: "",
+      chargeable_weight_manual: "false",
     } as Record<string, string>,
     parties: {} as Record<string, Entity | null>,
     cargo: [blankCargo()],
@@ -58,18 +73,151 @@ export function JobForm() {
       due: string;
     }[],
     key: "",
+    savedId: "",
+    savedVersion: 0,
+    loadedFrom: "",
+    jobVersion: 0,
   });
+  const rfqId = requestedRfqId || draft.value.fields.rfq_id || null;
+  const conversationId = requestedConversationId || draft.value.fields.source_conversation_id || null;
   const { fields: f, parties, cargo, containers, charges } = draft.value;
+  const { ready: draftReady, setValue: setDraftValue } = draft;
+  const formReady = draftReady && (!(editId || savedId) || draft.value.loadedFrom === (editId || savedId));
+  const draftKey = draft.value.key;
   const [saving, setSaving] = useState(false),
-    [error, setError] = useState<unknown>(null);
+    [error, setError] = useState<unknown>(null),
+    [savedMessage, setSavedMessage] = useState("");
+  const existing = useQuery<Job & { parties: Record<string, Entity | null> }>({
+    queryKey: ["freight", user?.tenant_id, "job", editId],
+    queryFn: () => freight.get("/jobs/" + editId),
+    enabled: !!editId && !!user,
+  });
+  const saved = useQuery<{ form: typeof draft.value; version: number; shipment_id: string | null }>({
+    queryKey: ["freight", user?.tenant_id, "job-draft", savedId],
+    queryFn: () => freight.get("/job-drafts/" + savedId),
+    enabled: !!savedId && !!user && !editId,
+  });
+  useEffect(() => {
+    if (!draftReady || draft.value.loadedFrom === (editId || savedId)) return;
+    if (editId && existing.data?.form) {
+      const form = existing.data.form;
+      const fields = Object.fromEntries(Object.entries(form).filter(([key, value]) =>
+        !["cargo", "containers", "waybill_charges", "idempotency_key", "draft_id"].includes(key)
+        && !key.endsWith("_id") && value !== null,
+      ).map(([key, value]) => [key, String(value)]));
+      for (const key of ["rfq_id", "source_conversation_id"])
+        if (form[key]) fields[key] = form[key];
+      for (const key of ["etd", "eta", "cfs_cutoff", "vgm_deadline", "free_time_expires_at"])
+        fields[key] = localDateInput(form[key]);
+      const mappedCargo = (form.cargo || []).map((line: any) => {
+        let dimension_items: DimensionItem[] = [];
+        if (Array.isArray(line.dimension_items) && line.dimension_items.length > 0) {
+          dimension_items = line.dimension_items.map((dim: any) => {
+            const d: DimensionItem = {
+              pieces: Math.max(1, Number(dim.pieces) || 1),
+              length: Math.max(0, Number(dim.length) || 0),
+              width: Math.max(0, Number(dim.width) || 0),
+              height: Math.max(0, Number(dim.height) || 0),
+              unit: dim.unit === "m" ? "m" : "cm",
+              gross_weight: Math.max(0, Number(dim.gross_weight) || 0),
+              volume: Math.max(0, Number(dim.volume) || 0),
+              volumetric_weight: Math.max(0, Number(dim.volumetric_weight) || 0),
+            };
+            const calc = calcDimensionItem(d, form.mode || "air");
+            d.volume = d.volume || calc.volume;
+            d.volumetric_weight = d.volumetric_weight || calc.volumetric_weight;
+            return d;
+          });
+        } else {
+          dimension_items = parseDimensionsString(
+            line.dimensions || "",
+            Number(line.pieces) || 1,
+            Number(line.gross_weight) || 0,
+            form.mode || "air",
+          );
+        }
+        const totPieces = dimension_items.reduce((s, d) => s + (d.pieces || 0), 0) || Number(line.pieces) || 1;
+        const totGross = dimension_items.reduce((s, d) => s + (d.gross_weight || 0), 0) || Number(line.gross_weight) || 0;
+        const totVol = dimension_items.reduce((s, d) => s + (d.volume || 0), 0) || Number(line.volume) || 0;
+        const totVolWeight = dimension_items.reduce((s, d) => s + (d.volumetric_weight || 0), 0) || Number(line.volumetric_weight) || 0;
+        return {
+          ...line,
+          ...Object.fromEntries(
+            ["pieces", "gross_weight", "net_weight", "chargeable_weight", "rate", "volume"].map(
+              (key) => [key, Number(line[key] || 0)],
+            ),
+          ),
+          pieces: totPieces,
+          gross_weight: totGross,
+          volume: totVol,
+          volumetric_weight: totVolWeight,
+          dimensions: line.dimensions || formatDimensions(dimension_items),
+          dimension_items,
+        };
+      });
+      setDraftValue((value) => ({ ...value, fields, parties: existing.data.parties,
+        cargo: mappedCargo, containers: form.containers || [],
+        charges: (form.waybill_charges || []).map((charge: { amount: number }) => ({ ...charge, amount: Number(charge.amount) })),
+        key: form.idempotency_key, savedId: form.draft_id || "", loadedFrom: editId, jobVersion: existing.data.version,
+      }));
+    } else if (savedId && saved.data) {
+      if (saved.data.shipment_id) {
+        router.replace("/shipments/" + saved.data.shipment_id);
+        return;
+      }
+      setDraftValue((value) => ({ ...value, ...saved.data.form, savedId,
+        savedVersion: saved.data.version, loadedFrom: savedId,
+      }));
+    }
+  }, [draftReady, editId, savedId, existing.data, saved.data, draft.value.loadedFrom, setDraftValue, router]);
   const rfq = useQuery({
     queryKey: ["freight", user?.tenant_id, "rfq", rfqId],
     queryFn: () => freight.get<Record<string, any>>("/rfqs/" + rfqId),
-    enabled: !!rfqId,
+    enabled: !!rfqId && !!user && !editId,
+  });
+  const source = useQuery<{
+    subject: string;
+    body: string;
+    workflow: string;
+    customer: Entity | null;
+    triage_reason: string;
+    cargo?: string;
+    bill_review_required?: boolean;
+  }>({
+    queryKey: ["freight", user?.tenant_id, "mail-job-context", conversationId],
+    queryFn: ({ signal }) =>
+      freight.get(
+        "/email-requests/" + conversationId + "/context",
+        undefined,
+        signal,
+      ),
+    enabled: !!conversationId && !!user && !editId,
   });
   useEffect(() => {
-    if (draft.ready && rfq.data && !f.rfq_id)
-      draft.setValue((v) => ({
+    if (
+      formReady &&
+      source.data &&
+      conversationId &&
+      !f.source_conversation_id
+    )
+      setDraftValue((value) => ({
+        ...value,
+        fields: { ...value.fields, source_conversation_id: conversationId },
+        parties: {
+          ...value.parties,
+          customer_id: value.parties.customer_id || source.data.customer,
+        },
+      }));
+  }, [
+    formReady,
+    source.data,
+    conversationId,
+    f.source_conversation_id,
+    setDraftValue,
+  ]);
+  useEffect(() => {
+    if (!editId && formReady && rfqId && rfq.data && !f.rfq_id)
+      setDraftValue((v) => ({
         ...v,
         fields: {
           ...v.fields,
@@ -78,42 +226,338 @@ export function JobForm() {
           service_type: services[rfq.data.mode],
           origin: rfq.data.origin,
           destination: rfq.data.destination,
+          etd: v.fields.etd || localDateInput(rfq.data.etd),
         },
         parties: {
           ...v.parties,
           customer_id: rfq.data.customer,
-          assigned_user_id: rfq.data.staff,
         },
+        cargo: v.cargo.map((line, index) => index === 0 && !line.description && rfq.data.form?.cargo
+          ? { ...line, description: rfq.data.form.cargo } : line),
       }));
-  }, [draft.ready, rfq.data, rfqId, f.rfq_id]);
+  }, [editId, formReady, setDraftValue, rfq.data, rfqId, f.rfq_id]);
   const settings = useQuery({
     queryKey: ["freight", user?.tenant_id, "settings"],
     queryFn: () => freight.get<Record<string, any>>("/settings"),
   });
   useEffect(() => {
-    if (draft.ready && settings.data)
-      draft.setValue((v) => ({
+    if (formReady && settings.data)
+      setDraftValue((v) => ({
         ...v,
         fields: {
           ...v.fields,
           handling: v.fields.handling ?? settings.data.handling ?? "",
           execution_place: v.fields.execution_place ?? settings.data.city ?? "",
+          signature: v.fields.signature ?? user?.full_name ?? settings.data.signature ?? "",
         },
       }));
-  }, [draft.ready, settings.data]);
+  }, [formReady, setDraftValue, settings.data, user?.full_name]);
   useEffect(() => {
-    if (draft.ready && !draft.value.key && user)
-      draft.setValue((v) => ({
+    if (formReady && !draftKey && user)
+      setDraftValue((v) => ({
         ...v,
         key: crypto.randomUUID(),
         parties: {
           ...v.parties,
-          assigned_user_id: { id: user.id, name: user.full_name },
+          assigned_user_id: v.parties.assigned_user_id ?? {
+            id: user.id,
+            name: user.full_name,
+          },
         },
       }));
-  }, [draft.ready, draft.value.key, user]);
-  const update = (key: string, value: string) =>
+  }, [formReady, setDraftValue, draftKey, user]);
+  const recalculateCommodityTotals = (
+    c: Cargo,
+    dimensionItems: DimensionItem[],
+    mode: string,
+  ): Cargo => {
+    const updatedDims = dimensionItems.map((dim) => {
+      const calc = calcDimensionItem(dim, mode);
+      return {
+        ...dim,
+        volume: calc.volume,
+        volumetric_weight: calc.volumetric_weight,
+      };
+    });
+
+    const totPieces = updatedDims.reduce(
+      (s, d) => s + (Number(d.pieces) || 0),
+      0,
+    );
+    const totGross = Number(
+      updatedDims
+        .reduce((s, d) => s + (Number(d.gross_weight) || 0), 0)
+        .toFixed(2),
+    );
+    const totVol = Number(
+      updatedDims
+        .reduce((s, d) => s + (Number(d.volume) || 0), 0)
+        .toFixed(4),
+    );
+    const totVolWeight = Number(
+      updatedDims
+        .reduce((s, d) => s + (Number(d.volumetric_weight) || 0), 0)
+        .toFixed(2),
+    );
+    const autoCW = Math.max(totGross, totVolWeight);
+
+    return {
+      ...c,
+      dimension_items: updatedDims,
+      pieces: totPieces > 0 ? totPieces : c.pieces || 1,
+      gross_weight: totGross,
+      volume: totVol,
+      volumetric_weight: totVolWeight,
+      dimensions: formatDimensions(updatedDims),
+      chargeable_weight: autoCW,
+    };
+  };
+
+  const syncConsignmentTotals = (
+    v: typeof draft.value,
+    newCargoList: Cargo[],
+  ): typeof draft.value => {
+    const totGross = newCargoList.reduce(
+      (s, c) => s + (Number(c.gross_weight) || 0),
+      0,
+    );
+    const totVolWeight = newCargoList.reduce(
+      (s, c) => s + (Number(c.volumetric_weight) || 0),
+      0,
+    );
+    const autoCW = Math.max(totGross, totVolWeight);
+
+    const isManual = v.fields.chargeable_weight_manual === "true";
+    const totalCW =
+      isManual && v.fields.total_chargeable_weight !== ""
+        ? Number(v.fields.total_chargeable_weight)
+        : autoCW;
+
+    const syncedCargo = newCargoList.map((c) => {
+      if (newCargoList.length === 1) {
+        return { ...c, chargeable_weight: totalCW };
+      }
+      if (autoCW > 0) {
+        const ratio =
+          Math.max(Number(c.gross_weight) || 0, Number(c.volumetric_weight) || 0) /
+          autoCW;
+        return { ...c, chargeable_weight: Number((ratio * totalCW).toFixed(2)) };
+      }
+      return {
+        ...c,
+        chargeable_weight: Number((totalCW / newCargoList.length).toFixed(2)),
+      };
+    });
+
+    return {
+      ...v,
+      fields: {
+        ...v.fields,
+        total_chargeable_weight: isManual
+          ? v.fields.total_chargeable_weight
+          : autoCW > 0
+            ? autoCW.toFixed(2)
+            : "",
+      },
+      cargo: syncedCargo,
+    };
+  };
+
+  const update = (key: string, value: string) => {
+    if (key === "mode") {
+      draft.setValue((v) => {
+        const recomputedCargo = v.cargo.map((c) => {
+          const dims =
+            c.dimension_items && c.dimension_items.length > 0
+              ? c.dimension_items
+              : [blankDimensionItem()];
+          return recalculateCommodityTotals(c, dims, value);
+        });
+        const updated = {
+          ...v,
+          fields: {
+            ...v.fields,
+            mode: value,
+            service_type: services[value] || v.fields.service_type,
+          },
+          cargo: recomputedCargo,
+        };
+        return syncConsignmentTotals(updated, recomputedCargo);
+      });
+      return;
+    }
     draft.setValue((v) => ({ ...v, fields: { ...v.fields, [key]: value } }));
+  };
+
+  const addDimension = (commodityIndex: number) => {
+    draft.setValue((v) => {
+      const target = v.cargo[commodityIndex];
+      const currentDims =
+        target.dimension_items && target.dimension_items.length > 0
+          ? target.dimension_items
+          : [blankDimensionItem()];
+      const nextDims = [...currentDims, blankDimensionItem()];
+      const updatedCargo = recalculateCommodityTotals(
+        target,
+        nextDims,
+        v.fields.mode,
+      );
+      const newCargoList = v.cargo.map((c, i) =>
+        i === commodityIndex ? updatedCargo : c,
+      );
+      return syncConsignmentTotals(v, newCargoList);
+    });
+  };
+
+  const removeDimension = (
+    commodityIndex: number,
+    dimensionIndex: number,
+  ) => {
+    draft.setValue((v) => {
+      const target = v.cargo[commodityIndex];
+      if (!target.dimension_items || target.dimension_items.length <= 1)
+        return v;
+      const nextDims = target.dimension_items.filter(
+        (_, idx) => idx !== dimensionIndex,
+      );
+      const updatedCargo = recalculateCommodityTotals(
+        target,
+        nextDims,
+        v.fields.mode,
+      );
+      const newCargoList = v.cargo.map((c, i) =>
+        i === commodityIndex ? updatedCargo : c,
+      );
+      return syncConsignmentTotals(v, newCargoList);
+    });
+  };
+
+  const changeDimension = (
+    commodityIndex: number,
+    dimensionIndex: number,
+    key: keyof DimensionItem,
+    value: any,
+  ) => {
+    draft.setValue((v) => {
+      const target = v.cargo[commodityIndex];
+      const currentDims =
+        target.dimension_items && target.dimension_items.length > 0
+          ? [...target.dimension_items]
+          : [blankDimensionItem()];
+
+      const updatedDim = {
+        ...currentDims[dimensionIndex],
+        [key]: ["pieces", "length", "width", "height", "gross_weight"].includes(
+          key,
+        )
+          ? Math.max(0, Number(value) || 0)
+          : value,
+      };
+      if (key === "pieces") {
+        updatedDim.pieces = Math.max(1, Number(value) || 1);
+      }
+      currentDims[dimensionIndex] = updatedDim;
+
+      const updatedCargo = recalculateCommodityTotals(
+        target,
+        currentDims,
+        v.fields.mode,
+      );
+      const newCargoList = v.cargo.map((c, i) =>
+        i === commodityIndex ? updatedCargo : c,
+      );
+      return syncConsignmentTotals(v, newCargoList);
+    });
+  };
+
+  const handleChargeableWeightInputChange = (val: string) => {
+    draft.setValue((v) => {
+      const numVal = Number(val);
+      const newCargo = v.cargo.map((c) => {
+        if (v.cargo.length === 1) {
+          return { ...c, chargeable_weight: numVal || 0 };
+        }
+        const totGross = v.cargo.reduce(
+          (s, item) => s + (Number(item.gross_weight) || 0),
+          0,
+        );
+        const totVolWeight = v.cargo.reduce(
+          (s, item) => s + (Number(item.volumetric_weight) || 0),
+          0,
+        );
+        const autoCW = Math.max(totGross, totVolWeight);
+        if (autoCW > 0) {
+          const ratio =
+            Math.max(
+              Number(c.gross_weight) || 0,
+              Number(c.volumetric_weight) || 0,
+            ) / autoCW;
+          return {
+            ...c,
+            chargeable_weight: Number((ratio * (numVal || 0)).toFixed(2)),
+          };
+        }
+        return {
+          ...c,
+          chargeable_weight: Number(
+            ((numVal || 0) / v.cargo.length).toFixed(2),
+          ),
+        };
+      });
+
+      return {
+        ...v,
+        fields: {
+          ...v.fields,
+          total_chargeable_weight: val,
+          chargeable_weight_manual: "true",
+        },
+        cargo: newCargo,
+      };
+    });
+  };
+
+  const resetToAutoChargeable = () => {
+    draft.setValue((v) => {
+      const totGross = v.cargo.reduce(
+        (s, c) => s + (Number(c.gross_weight) || 0),
+        0,
+      );
+      const totVolWeight = v.cargo.reduce(
+        (s, c) => s + (Number(c.volumetric_weight) || 0),
+        0,
+      );
+      const autoCW = Math.max(totGross, totVolWeight);
+
+      const newCargo = v.cargo.map((c) => {
+        if (v.cargo.length === 1) {
+          return { ...c, chargeable_weight: autoCW };
+        }
+        if (autoCW > 0) {
+          const ratio =
+            Math.max(
+              Number(c.gross_weight) || 0,
+              Number(c.volumetric_weight) || 0,
+            ) / autoCW;
+          return {
+            ...c,
+            chargeable_weight: Number((ratio * autoCW).toFixed(2)),
+          };
+        }
+        return { ...c, chargeable_weight: 0 };
+      });
+
+      return {
+        ...v,
+        fields: {
+          ...v.fields,
+          total_chargeable_weight: autoCW > 0 ? autoCW.toFixed(2) : "",
+          chargeable_weight_manual: "false",
+        },
+        cargo: newCargo,
+      };
+    });
+  };
   const field = (
     key: string,
     label: string,
@@ -129,6 +573,7 @@ export function JobForm() {
         min={type === "number" ? "0" : undefined}
         step={type === "number" ? ".01" : undefined}
         onChange={(e) => update(key, e.target.value)}
+        readOnly={!!editId && !!f.consolidation_reference && ["origin", "destination", "master_number", "flight_number", "vessel", "voyage", "etd", "eta"].includes(key)}
       />
     </Field>
   );
@@ -138,6 +583,7 @@ export function JobForm() {
         className={inputClass}
         value={f[key] || options[0]}
         onChange={(e) => update(key, e.target.value)}
+        disabled={!!editId && ["shipment_model", "service_type"].includes(key)}
       >
         {options.map((v) => (
           <option key={v}>{v}</option>
@@ -173,6 +619,26 @@ export function JobForm() {
           : c,
       ),
     }));
+  const totalGrossWeight = cargo.reduce(
+    (s, c) => s + (Number(c.gross_weight) || 0),
+    0,
+  );
+  const totalVolumetricWeight = cargo.reduce(
+    (s, c) => s + (Number(c.volumetric_weight) || 0),
+    0,
+  );
+  const totalVolume = cargo.reduce(
+    (s, c) => s + (Number(c.volume) || 0),
+    0,
+  );
+  const autoChargeableWeight = Math.max(totalGrossWeight, totalVolumetricWeight);
+  const isChargeableOverridden = f.chargeable_weight_manual === "true";
+  const displayedChargeableWeight = isChargeableOverridden
+    ? f.total_chargeable_weight
+    : autoChargeableWeight > 0
+      ? autoChargeableWeight.toFixed(2)
+      : "";
+
   const weightCharge = cargo.reduce(
     (s, c) => s + c.chargeable_weight * c.rate,
     0,
@@ -187,6 +653,11 @@ export function JobForm() {
     (f.other_payment === payment ? Number(f.tax || 0) : 0);
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (
+      saving ||
+      (!editId && conversationId && (!source.data || source.data.workflow !== "ready"))
+    )
+      return;
     setError(null);
     if (
       [
@@ -203,12 +674,37 @@ export function JobForm() {
     }
     setSaving(true);
     try {
+      const finalCargo = cargo.map((c) => ({
+        ...c,
+        pieces: Number(c.pieces) || 1,
+        gross_weight: Number(c.gross_weight) || 0,
+        net_weight: Number(c.net_weight) || 0,
+        chargeable_weight: Number(c.chargeable_weight) || 0,
+        rate: Number(c.rate) || 0,
+        volume: Number(c.volume) || 0,
+        volumetric_weight: Number(c.volumetric_weight) || 0,
+        dimensions: c.dimensions || formatDimensions(c.dimension_items),
+        dimension_items: (c.dimension_items || []).map((d) => ({
+          pieces: Number(d.pieces) || 1,
+          length: Number(d.length) || 0,
+          width: Number(d.width) || 0,
+          height: Number(d.height) || 0,
+          unit: d.unit === "m" ? "m" : "cm",
+          gross_weight: Number(d.gross_weight) || 0,
+          volume: Number(d.volume) || 0,
+          volumetric_weight: Number(d.volumetric_weight) || 0,
+        })),
+      }));
+
       const body: Record<string, unknown> = {
         ...f,
-        cargo,
+        bl_type: f.bl_type || "original",
+        total_chargeable_weight: Number(displayedChargeableWeight || autoChargeableWeight || 0),
+        cargo: finalCargo,
         containers,
         waybill_charges: charges,
         idempotency_key: draft.value.key,
+        ...(conversationId ? { source_conversation_id: conversationId } : {}),
       };
       for (const [key, p] of Object.entries(parties)) body[key] = p?.id || null;
       for (const key of [
@@ -218,11 +714,18 @@ export function JobForm() {
         "vgm_deadline",
         "free_time_expires_at",
       ])
-        body[key] = f[key] ? new Date(f[key]).toISOString() : null;
+        body[key] = editId && f[key] === localDateInput(existing.data?.form?.[key])
+          ? existing.data?.form?.[key] || null
+          : f[key] ? new Date(f[key]).toISOString() : null;
       for (const key of ["tax", "valuation_charge"])
         body[key] = Number(f[key] || 0);
-      const result = await freight.post<{ id: string }>("/jobs", body);
+      if (draft.value.savedId) body.draft_id = draft.value.savedId;
+      if (editId) body.version = draft.value.jobVersion;
+      const result = editId
+        ? await freight.put<{ id: string }>("/jobs/" + editId + "/form", body)
+        : await freight.post<{ id: string }>("/jobs", body);
       draft.clear();
+      await client.invalidateQueries({ queryKey: ["freight", user?.tenant_id] });
       router.push(`/shipments/${result.id}`);
     } catch (err) {
       setError(err);
@@ -230,11 +733,29 @@ export function JobForm() {
       setSaving(false);
     }
   };
+  const saveDraft = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const id = draft.value.savedId || draft.value.key;
+      const { fields, parties, cargo, containers, charges, key } = draft.value;
+      const result = await freight.put<{ id: string; version: number }>("/job-drafts/" + id, {
+        version: draft.value.savedVersion || 0,
+        form: { fields, parties, cargo, containers, charges, key },
+      });
+      setDraftValue(value => ({ ...value, savedId: result.id, savedVersion: result.version }));
+      setSavedMessage("Draft saved. Resume it from Jobs later. Save again after making further changes.");
+      await client.invalidateQueries({ queryKey: ["freight", user?.tenant_id, "job-drafts"] });
+    } catch (err) { setError(err); }
+    finally { setSaving(false); }
+  };
   const warning = f.mode === "air" ? mawbWarning(f.master_number || "") : null;
-  if (!draft.ready)
+  if (!draft.ready || ((editId || savedId) && draft.value.loadedFrom !== (editId || savedId)))
     return (
-      <div className="animate-pulse rounded-xl bg-white p-10">
-        Loading job form…
+      <div className="rounded-xl bg-white p-10">
+        <ErrorBanner error={existing.error || saved.error} />
+        {existing.error || saved.error ? "Job form unavailable. Return to Jobs and try again." : "Loading job form…"}
       </div>
     );
   return (
@@ -242,7 +763,7 @@ export function JobForm() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            New {f.mode} job
+            {editId ? "Edit" : "New"} {f.mode} job
           </h1>
           <p className="mt-1 text-xs text-[#858693]">
             {f.mode === "air"
@@ -250,32 +771,87 @@ export function JobForm() {
               : f.mode === "ocean"
                 ? "House Bill of Lading"
                 : "Transport instruction"}{" "}
-            · Draft
+            · {editId ? existing.data?.ref_number : "Draft"}
           </p>
         </div>
-        <button className={buttonClass} disabled={saving}>
+        <div className="flex flex-wrap gap-2">
+        {!editId && <button type="button" className={secondaryClass}
+          disabled={saving || !draft.value.key} onClick={saveDraft}>
+          <Save size={14} />Save draft
+        </button>}
+        <button type="submit"
+          className={buttonClass}
+          disabled={
+            saving ||
+            (!editId && !!conversationId &&
+              (!source.data || source.data.workflow !== "ready"))
+          }
+        >
           <Save size={14} />
-          {saving ? "Creating…" : "Create job & document"}
+          {saving ? "Saving…" : editId ? "Save changes" : "Create job & document"}
         </button>
+        </div>
       </div>
+      {savedMessage && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-900">{savedMessage}</p>}
+      {editId && <p className="text-xs text-[#777884]">Save updates the shipment and draft transport documents. Issued documents keep their issued content.</p>}
+      {!editId && conversationId && (
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
+          <strong>
+            {source.data?.subject || "Loading customer confirmation…"}
+          </strong>
+          <p className="mt-1 text-xs">
+            Review the customer confirmation, parties, route, cargo and agreed
+            charges before creating this job.
+          </p>
+          {source.data && (
+            <p className="mt-3 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs">
+              {source.data.body}
+            </p>
+          )}
+          {source.data?.bill_review_required && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            AWB/BL correspondence exists in this thread. Check the original documents and existing bills before creating another job or issuing a bill.
+          </p>}
+          {source.data?.cargo && <div className="mt-3">
+            <p className="text-xs">Cargo notes include readable customer packing-list attachments. Review the complete source in the email conversation.</p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">{source.data.cargo}</pre>
+            <button type="button" className={secondaryClass + " mt-2"} disabled={!!cargo[0]?.description}
+              onClick={() => setDraftValue(value => ({ ...value, cargo: value.cargo.map((line, index) => index === 0 && !line.description ? { ...line, description: source.data!.cargo!.slice(0, 2000) } : line) }))}>
+              Use notes in empty cargo description
+            </button>
+            <p className="mt-1 text-xs">Copies up to 2,000 characters. Enter package counts, weights and dimensions in their fields after verification.</p>
+          </div>}
+          {source.data && source.data.workflow !== "ready" && (
+            <p role="alert" className="mt-2 font-medium">
+              This conversation is no longer awaiting job creation. Return to
+              the RFQ pipeline to check its latest status.
+            </p>
+          )}
+          <ErrorBanner error={source.error} />
+        </div>
+      )}
       {draft.storageError && (
         <p role="alert" className="text-xs text-amber-700">
           {draft.storageError}
         </p>
       )}
       <ErrorBanner error={error} />
+      {(editId || savedId) && <button type="button" className={secondaryClass} disabled={saving}
+        onClick={async () => {
+          const result = editId ? await existing.refetch() : await saved.refetch();
+          if (!result.error) {
+            setDraftValue(value => ({ ...value, loadedFrom: "" }));
+            setError(null);
+          }
+        }}>Reload saved {editId ? "job" : "draft"}</button>}
+      <ErrorBanner error={rfq.error} />
       <div className="flex flex-wrap gap-2">
         {Object.keys(services).map((mode) => (
           <button
             key={mode}
             type="button"
+            disabled={!!editId}
             className={`${secondaryClass} capitalize ${f.mode === mode ? "!border-[#7068cf] !bg-[#f4f2ff] !text-[#7068cf]" : ""}`}
-            onClick={() =>
-              draft.setValue((v) => ({
-                ...v,
-                fields: { ...v.fields, mode, service_type: services[mode] },
-              }))
-            }
+            onClick={() => update("mode", mode)}
           >
             {mode}
           </button>
@@ -322,6 +898,38 @@ export function JobForm() {
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
+          {f.mode === "ocean" && (
+            <div className="md:col-span-2 rounded-lg border border-[#eeecf5] bg-[#faf9fd] p-3">
+              <label className="block text-xs font-semibold text-[#606174] mb-2">
+                Bill of Lading Type
+              </label>
+              <div className="flex items-center gap-6 text-sm">
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={f.bl_type === "sea_waybill"}
+                    onChange={() => update("bl_type", "sea_waybill")}
+                  />
+                  <span className="font-medium text-[#2d2e3e]">Sea Waybill</span>
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={f.bl_type !== "sea_waybill"}
+                    onChange={() => update("bl_type", "original")}
+                  />
+                  <span className="font-medium text-[#2d2e3e]">Original</span>
+                </label>
+              </div>
+              <p className="mt-1.5 text-[11px] text-[#858693]">
+                {f.bl_type === "sea_waybill"
+                  ? "Sea Waybill (non-negotiable; cargo released to consignee without surrender of original bills)."
+                  : "Original Bill of Lading (negotiable; standard set of 3 originals issued)."}
+              </p>
+            </div>
+          )}
           {field(
             "master_number",
             f.mode === "air"
@@ -331,7 +939,7 @@ export function JobForm() {
                 : "CMR / Waybill number",
           )}
           <Field label={f.mode === "air" ? "HAWB number" : "House reference"}>
-            <input className={inputClass} readOnly value="Allocated on save" />
+            <input className={inputClass} readOnly value={editId ? existing.data?.house_number : "Allocated on creation"} />
           </Field>
           {warning && (
             <p
@@ -466,10 +1074,10 @@ export function JobForm() {
             type="button"
             className={secondaryClass}
             onClick={() =>
-              draft.setValue((v) => ({
-                ...v,
-                cargo: [...v.cargo, blankCargo()],
-              }))
+              draft.setValue((v) => {
+                const newCargo = [...v.cargo, blankCargo()];
+                return syncConsignmentTotals(v, newCargo);
+              })
             }
           >
             <Plus size={13} />
@@ -477,84 +1085,442 @@ export function JobForm() {
           </button>
         }
       >
-        <div className="space-y-5">
-          {cargo.map((c, i) => (
-            <div key={i} className="rounded-xl border border-[#eeecf5] p-4">
-              <div className="mb-3 flex justify-between text-xs font-semibold">
-                <span>Commodity {i + 1}</span>
-                <button
-                  type="button"
-                  disabled={cargo.length === 1}
-                  aria-label="Remove commodity"
-                  onClick={() =>
-                    draft.setValue((v) => ({
-                      ...v,
-                      cargo: v.cargo.filter((_, n) => n !== i),
-                    }))
-                  }
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {(
-                  [
-                    ["description", "Nature & quantity of goods"],
-                    ["pieces", "Pieces"],
-                    ["gross_weight", "Gross weight"],
-                    ["net_weight", "Net weight"],
-                    ["chargeable_weight", "Chargeable weight"],
-                    ["rate_class", "Rate class"],
-                    ["commodity_number", "Commodity item no."],
-                    ["rate", "Rate / charge"],
-                    ["dimensions", "Dimensions"],
-                    ["volume", "Volume (m³)"],
-                    ["marks", "Marks & numbers"],
-                  ] as [keyof Cargo, string][]
-                )
-                  .filter(
-                    ([key]) =>
-                      f.mode === "air" ||
-                      ![
-                        "chargeable_weight",
-                        "rate_class",
-                        "commodity_number",
-                        "rate",
-                      ].includes(key),
-                  )
-                  .map(([key, label]) => (
-                    <Field key={key} label={label}>
-                      <input
-                        className={inputClass}
-                        required={key === "description"}
-                        type={typeof c[key] === "number" ? "number" : "text"}
-                        min={key === "pieces" ? 1 : 0}
-                        step={key === "pieces" ? "1" : "any"}
-                        value={c[key]}
-                        onChange={(e) => changeCargo(i, key, e.target.value)}
-                      />
-                    </Field>
-                  ))}
-                <Field label="Weight unit">
-                  <select
-                    className={inputClass}
-                    value={c.weight_unit}
-                    onChange={(e) =>
-                      changeCargo(i, "weight_unit", e.target.value)
+        <div className="space-y-6">
+          {cargo.map((c, i) => {
+            const dimensionItems =
+              c.dimension_items && c.dimension_items.length > 0
+                ? c.dimension_items
+                : [blankDimensionItem()];
+
+            return (
+              <div
+                key={i}
+                className="rounded-xl border border-[#eeecf5] bg-white p-4 shadow-xs space-y-4"
+              >
+                <div className="flex items-center justify-between border-b border-[#eeecf5] pb-2 text-xs font-semibold text-[#1f2029]">
+                  <span className="flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-50 text-[11px] font-bold text-indigo-700">
+                      {i + 1}
+                    </span>
+                    Commodity {i + 1}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={cargo.length === 1}
+                    aria-label="Remove commodity"
+                    className="text-[#858693] hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                    onClick={() =>
+                      draft.setValue((v) => {
+                        const newCargo = v.cargo.filter((_, n) => n !== i);
+                        return syncConsignmentTotals(v, newCargo);
+                      })
                     }
                   >
-                    <option>kg</option>
-                    <option>lb</option>
-                  </select>
-                </Field>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="md:col-span-2">
+                    <Field label="Nature & quantity of goods *">
+                      <input
+                        className={inputClass}
+                        required
+                        type="text"
+                        placeholder="Description of commodity"
+                        value={c.description}
+                        onChange={(e) =>
+                          changeCargo(i, "description", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Marks & numbers">
+                    <input
+                      className={inputClass}
+                      type="text"
+                      placeholder="e.g. 1/10 or N/M"
+                      value={c.marks}
+                      onChange={(e) =>
+                        changeCargo(i, "marks", e.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Weight unit">
+                    <select
+                      className={inputClass}
+                      value={c.weight_unit}
+                      onChange={(e) =>
+                        changeCargo(i, "weight_unit", e.target.value)
+                      }
+                    >
+                      <option>kg</option>
+                      <option>lb</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Net weight">
+                    <input
+                      className={inputClass}
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={c.net_weight || ""}
+                      onChange={(e) =>
+                        changeCargo(i, "net_weight", e.target.value)
+                      }
+                    />
+                  </Field>
+
+                  {f.mode === "air" && (
+                    <>
+                      <Field label="Rate class">
+                        <input
+                          className={inputClass}
+                          type="text"
+                          value={c.rate_class}
+                          onChange={(e) =>
+                            changeCargo(i, "rate_class", e.target.value)
+                          }
+                        />
+                      </Field>
+                      <Field label="Commodity item no.">
+                        <input
+                          className={inputClass}
+                          type="text"
+                          value={c.commodity_number}
+                          onChange={(e) =>
+                            changeCargo(i, "commodity_number", e.target.value)
+                          }
+                        />
+                      </Field>
+                      <Field label="Rate / charge">
+                        <input
+                          className={inputClass}
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={c.rate}
+                          onChange={(e) =>
+                            changeCargo(i, "rate", e.target.value)
+                          }
+                        />
+                      </Field>
+                    </>
+                  )}
+                </div>
+
+                {/* Dimensions breakdown for this commodity */}
+                <div className="rounded-lg border border-[#eeecf5] bg-[#faf9fd] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-[#4e4f62]">
+                        Package Dimensions & Weights
+                      </div>
+                      <div className="text-[11px] text-[#858693]">
+                        Enter package dimensions. Volumetric weight is auto-calculated using{" "}
+                        {f.mode === "air"
+                          ? "/6000 (Air Freight)"
+                          : f.mode === "ocean"
+                            ? "/1000 (Ocean Freight)"
+                            : "standard formula"}
+                        .
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#eeecf5] text-[#777884]">
+                          <th className="pb-1.5 font-medium">Pieces</th>
+                          <th className="pb-1.5 font-medium">Length</th>
+                          <th className="pb-1.5 font-medium">Width</th>
+                          <th className="pb-1.5 font-medium">Height</th>
+                          <th className="pb-1.5 font-medium">Unit</th>
+                          <th className="pb-1.5 font-medium">
+                            Gross Wt ({c.weight_unit || "kg"})
+                          </th>
+                          <th className="pb-1.5 font-medium">Volume (m³)</th>
+                          <th className="pb-1.5 font-medium">
+                            Vol. Wt ({c.weight_unit || "kg"})
+                          </th>
+                          <th className="pb-1.5 font-medium w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#f0eef9]">
+                        {dimensionItems.map((dim, j) => (
+                          <tr key={j} className="hover:bg-[#f6f5fc]">
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-18 min-w-[70px]`}
+                                value={dim.pieces || 1}
+                                onChange={(e) =>
+                                  changeDimension(i, j, "pieces", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                placeholder="0"
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-20 min-w-[75px]`}
+                                value={dim.length || ""}
+                                onChange={(e) =>
+                                  changeDimension(i, j, "length", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                placeholder="0"
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-20 min-w-[75px]`}
+                                value={dim.width || ""}
+                                onChange={(e) =>
+                                  changeDimension(i, j, "width", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                placeholder="0"
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-20 min-w-[75px]`}
+                                value={dim.height || ""}
+                                onChange={(e) =>
+                                  changeDimension(i, j, "height", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <select
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-18 min-w-[65px]`}
+                                value={dim.unit || "cm"}
+                                onChange={(e) =>
+                                  changeDimension(i, j, "unit", e.target.value)
+                                }
+                              >
+                                <option value="cm">cm</option>
+                                <option value="m">m</option>
+                              </select>
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                placeholder="0"
+                                className={`${inputClass} !h-7 !py-0 !px-2 text-xs w-24 min-w-[85px]`}
+                                value={dim.gross_weight || ""}
+                                onChange={(e) =>
+                                  changeDimension(
+                                    i,
+                                    j,
+                                    "gross_weight",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono text-[11px] text-[#2d2e3e]">
+                              {(dim.volume || 0).toFixed(4)}
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono text-[11px] text-[#2d2e3e]">
+                              {(dim.volumetric_weight || 0).toFixed(2)}
+                            </td>
+                            <td className="py-1.5 text-center">
+                              <button
+                                type="button"
+                                disabled={dimensionItems.length === 1}
+                                aria-label="Remove dimension"
+                                className="text-[#858693] hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                                onClick={() => removeDimension(i, j)}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#eeecf5] pt-2">
+                    <button
+                      type="button"
+                      className={`${secondaryClass} !py-1 !px-2.5 text-xs`}
+                      onClick={() => addDimension(i)}
+                    >
+                      <Plus size={12} />
+                      Add dimension
+                    </button>
+                    <div className="flex flex-wrap items-center gap-2.5 text-xs text-[#606174]">
+                      <span>
+                        Pieces: <strong>{c.pieces}</strong>
+                      </span>
+                      <span>•</span>
+                      <span>
+                        Gross Wt:{" "}
+                        <strong>
+                          {Number(c.gross_weight || 0).toFixed(2)}{" "}
+                          {c.weight_unit}
+                        </strong>
+                      </span>
+                      <span>•</span>
+                      <span>
+                        Volume:{" "}
+                        <strong>{Number(c.volume || 0).toFixed(4)} m³</strong>
+                      </span>
+                      <span>•</span>
+                      <span>
+                        Vol. Wt:{" "}
+                        <strong>
+                          {Number(c.volumetric_weight || 0).toFixed(2)}{" "}
+                          {c.weight_unit}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {f.mode === "air" && (
+                  <p className="text-right text-xs font-semibold text-[#2d2e3e]">
+                    Total weight charge:{" "}
+                    {(c.chargeable_weight * c.rate).toFixed(2)} {f.currency}
+                  </p>
+                )}
               </div>
-              {f.mode === "air" && (
-                <p className="mt-3 text-right text-xs font-semibold">
-                  Total {(c.chargeable_weight * c.rate).toFixed(2)} {f.currency}
+            );
+          })}
+
+          {/* Consignment Weight & Chargeable Weight Summary (All Commodities) */}
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-[#faf9fd] to-[#f4f2ff] p-4.5 shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 pb-2.5">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-950">
+                  Consignment Totals & Chargeable Weight
+                </h3>
+                <p className="text-[11px] text-[#777884]">
+                  Totalled across {cargo.length}{" "}
+                  {cargo.length === 1 ? "commodity" : "commodities"} · Formula:{" "}
+                  <span className="font-semibold text-indigo-700">
+                    {f.mode === "air"
+                      ? "Air Freight ((L × W × H cm) / 6000, 1 m³ = 166.67 kg)"
+                      : f.mode === "ocean"
+                        ? "Ocean Freight ((L × W × H cm) / 1000, 1 m³ = 1,000 kg)"
+                        : f.mode === "road"
+                          ? "Road Freight ((L × W × H cm) / 3000, 1 m³ = 333.33 kg)"
+                          : "Standard ((L × W × H cm) / 1000, 1 m³ = 1,000 kg)"}
+                  </span>
                 </p>
-              )}
+              </div>
             </div>
-          ))}
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-lg bg-white p-3 border border-[#eeecf5] shadow-xs">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#777884]">
+                  Total Gross Weight
+                </div>
+                <div className="mt-1 text-lg font-bold text-[#1f2029]">
+                  {totalGrossWeight.toFixed(2)}{" "}
+                  <span className="text-xs font-normal text-[#858693]">
+                    {cargo[0]?.weight_unit || "kg"}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#858693]">
+                  Sum of all commodity gross weights
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-white p-3 border border-[#eeecf5] shadow-xs">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#777884]">
+                  Total Volumetric Weight
+                </div>
+                <div className="mt-1 text-lg font-bold text-[#1f2029]">
+                  {totalVolumetricWeight.toFixed(2)}{" "}
+                  <span className="text-xs font-normal text-[#858693]">
+                    {cargo[0]?.weight_unit || "kg"}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#858693]">
+                  Auto-calculated in m³ and converted
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-white p-3 border border-[#eeecf5] shadow-xs">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#777884]">
+                  Total Volume
+                </div>
+                <div className="mt-1 text-lg font-bold text-[#1f2029]">
+                  {totalVolume.toFixed(4)}{" "}
+                  <span className="text-xs font-normal text-[#858693]">m³</span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#858693]">
+                  Total cubic measurement (CBM)
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-white p-3 border-2 border-indigo-600 shadow-xs relative">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="consignment-chargeable-weight"
+                    className="text-[11px] font-bold uppercase tracking-wider text-indigo-900"
+                  >
+                    Chargeable Weight *
+                  </label>
+                  {isChargeableOverridden && (
+                    <button
+                      type="button"
+                      onClick={resetToAutoChargeable}
+                      className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                      title="Reset to max(Gross Weight, Volumetric Weight)"
+                    >
+                      Reset to Max
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <input
+                    id="consignment-chargeable-weight"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="0.00"
+                    className="w-full text-lg font-bold text-indigo-950 bg-transparent outline-none border-b border-indigo-300 focus:border-indigo-600"
+                    value={displayedChargeableWeight}
+                    onChange={(e) =>
+                      handleChargeableWeightInputChange(e.target.value)
+                    }
+                  />
+                  <span className="text-xs font-semibold text-indigo-900">
+                    {cargo[0]?.weight_unit || "kg"}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#777884]">
+                  {isChargeableOverridden ? (
+                    <span className="text-amber-700 font-medium">
+                      Manually edited (Auto max: {autoChargeableWeight.toFixed(2)})
+                    </span>
+                  ) : (
+                    <span>
+                      Auto: Max({totalGrossWeight.toFixed(2)},{" "}
+                      {totalVolumetricWeight.toFixed(2)})
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </Panel>
       <Panel title="Charges & declarations">
@@ -721,9 +1687,17 @@ export function JobForm() {
       </Panel>
       <ErrorBanner error={error} />
       <div className="flex justify-end pb-8">
-        <button className={buttonClass} disabled={saving}>
+        {!editId && <button type="button" className={secondaryClass} disabled={saving || !draft.value.key} onClick={saveDraft}>Save draft</button>}
+        <button type="submit"
+          className={buttonClass}
+          disabled={
+            saving ||
+            (!editId && !!conversationId &&
+              (!source.data || source.data.workflow !== "ready"))
+          }
+        >
           <Save size={14} />
-          {saving ? "Creating…" : "Create job & document"}
+          {saving ? "Saving…" : editId ? "Save changes" : "Create job & document"}
         </button>
       </div>
     </form>

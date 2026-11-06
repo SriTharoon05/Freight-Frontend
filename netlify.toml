@@ -1,6 +1,25 @@
 [build]
-command = "npx next build"
+command = "next build --webpack"
 publish = ".next"
+
+[functions]
+directory = "netlify/functions"
+
+[build.environment]
+NODE_VERSION = "22"
+# Next.js embeds these public values in browser bundles. Other keys remain scanned.
+SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_API_BASE_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY"
 
 [[plugins]]
 package = "@netlify/plugin-nextjs"
+
+# Netlify serves public demo files directly, outside Next's header handler.
+[[headers]]
+for = "/demo/*"
+  [headers.values]
+  Cache-Control = "no-store"
+  Referrer-Policy = "strict-origin-when-cross-origin"
+  X-Content-Type-Options = "nosniff"
+  X-Frame-Options = "SAMEORIGIN"
+  Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+  Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'self' https://www.openstreetmap.org; frame-ancestors 'self'; object-src 'none'; base-uri 'self'"

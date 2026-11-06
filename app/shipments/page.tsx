@@ -11,17 +11,20 @@ import {
   ErrorBanner,
   inputClass,
   buttonClass,
+  secondaryClass,
 } from "@/components/freight/shared";
-import { freight, type Page, type Job, dateLabel } from "@/lib/freight";
+import { freight, type Page, type Job, type Entity, dateLabel } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
+type SavedJobDraft = { id: string; updated_at: string; form: { fields?: Record<string, string>; parties?: { customer_id?: Entity }; cargo?: unknown[] } };
 export default function JobsPage() {
-  const assignedUserId = useSearchParams().get("assigned_user_id") || undefined;
+  const searchParams = useSearchParams();
+  const assignedUserId = searchParams.get("assigned_user_id") || undefined;
   const user = useAuthStore((s) => s.user),
     [page, setPage] = useState(1),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
     [mode, setMode] = useState(""),
-    [status, setStatus] = useState("");
+    [status, setStatus] = useState(searchParams.get("status") || "");
   useEffect(() => {
     const t = setTimeout(() => {
       setQuery(search);
@@ -49,6 +52,11 @@ export default function JobsPage() {
         assigned_user_id: assignedUserId,
       }),
   });
+  const drafts = useQuery<Page<SavedJobDraft>>({
+    queryKey: ["freight", user?.tenant_id, "job-drafts"],
+    queryFn: () => freight.get<Page<SavedJobDraft>>("/job-drafts", { limit: 20 }),
+    enabled: !!user && !["finance", "customer"].includes(user.role),
+  });
   return (
     <AppShell>
       <div className="space-y-6">
@@ -62,6 +70,20 @@ export default function JobsPage() {
             New job
           </Link>
         </div>
+        <Panel title="Saved drafts">
+          <ErrorBanner error={drafts.error} />
+          {drafts.isLoading ? <p className="text-xs text-[#858693]">Loading drafts…</p> : !drafts.data?.items.length ? (
+            <p className="text-xs text-[#858693]">Save an incomplete job with “Save draft”, then resume and edit it here before creation.</p>
+          ) : <div className="space-y-3">{drafts.data.items.map((draft: SavedJobDraft) => (
+            <div key={draft.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-xs">
+              <div><strong>{draft.form.parties?.customer_id?.name || "Untitled job draft"}</strong> <span className="ml-2 rounded bg-amber-50 px-2 py-1 font-semibold text-amber-800">Draft · not created</span>
+                <p className="mt-1 text-[#858693]">{draft.form.fields?.origin || "Origin pending"} → {draft.form.fields?.destination || "Destination pending"} · Saved {dateLabel(draft.updated_at)}</p></div>
+              <Link className={secondaryClass} href={`/shipments/new?draft=${draft.id}`}>Resume & edit draft</Link>
+            </div>
+          ))}
+          {drafts.data && drafts.data.total > drafts.data.items.length && <p className="mt-3 text-xs">Showing the 20 most recently saved drafts.</p>}
+          </div>}
+        </Panel>
         <Panel title="Job register">
           <div className="mb-5 grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
             <input
@@ -96,6 +118,7 @@ export default function JobsPage() {
             >
               <option value="">All statuses</option>
               {[
+                "draft",
                 "booking_confirmed",
                 "in_transit",
                 "customs_import_pending",
@@ -140,7 +163,7 @@ export default function JobsPage() {
                     <td className="px-3 py-4">
                       <Link
                         className="font-semibold text-[#7068cf]"
-                        href={`/shipments/${job.id}`}
+                        href={job.is_draft ? `/shipments/new?draft=${job.id}` : `/shipments/${job.id}`}
                       >
                         {job.ref_number}
                       </Link>

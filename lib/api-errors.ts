@@ -6,8 +6,10 @@ function record(value: unknown): Record<string, unknown> {
 
 export function toApiError(error: unknown): ApiError {
   const source = record(error);
-  // Interceptors already normalize errors; pages may call this helper again.
-  if (typeof source.status === 'number' && typeof source.message === 'string') {
+  // Axios errors also expose status; their response contains the backend explanation.
+  // Preserve only errors that have already been normalized by our interceptor.
+  if (!source.response && source.isAxiosError !== true
+    && typeof source.status === 'number' && typeof source.message === 'string') {
     return source as unknown as ApiError;
   }
 
@@ -38,7 +40,16 @@ export function toApiError(error: unknown): ApiError {
     };
   }
   if (source.code === 'ECONNABORTED' || source.code === 'ETIMEDOUT') {
-    return { status: 0, message: 'The request timed out. Your workspace may still be starting; please try again.' };
+    const config = record(source.config);
+    if (typeof config.url === 'string'
+      && /\/integrations\/outlook\/mailboxes(?:\?|$)/.test(config.url)
+      && typeof config.method === 'string' && config.method.toLowerCase() === 'post') {
+      return {
+        status: 0,
+        message: 'Connecting the inbox timed out. Refresh the inbox list before retrying; the inbox may already be connected.',
+      };
+    }
+    return { status: 0, message: 'The request timed out. Please refresh and try again.' };
   }
   if (source.request) {
     return { status: 0, message: 'Could not connect to your workspace. Please check your connection and try again.' };

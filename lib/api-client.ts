@@ -43,6 +43,9 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
   const method = (config.method || 'get').toLowerCase();
+  // Free hosting can take over 30 seconds to wake. Keep write timeouts and
+  // explicit endpoint overrides, while giving ordinary reads time to recover.
+  if (method === 'get' && config.timeout === api.defaults.timeout) config.timeout = 90000;
   if (['post', 'patch', 'put', 'delete'].includes(method)) {
     config.headers['X-Requested-With'] = 'XMLHttpRequest';
   }

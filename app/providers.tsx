@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '@/lib/use-realtime';
 import { useAuthStore } from '@/lib/auth-store';
+import { retryRead, readRetryDelay } from '@/lib/query-policy';
 
 export function Providers({ children }: { children: ReactNode }) {
   const user = useAuthStore((state) => state.user);
@@ -21,7 +22,8 @@ function SessionProviders({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 30_000,
-            retry: 1,
+            retry: retryRead,
+            retryDelay: readRetryDelay,
             refetchOnWindowFocus: false,
           },
         },

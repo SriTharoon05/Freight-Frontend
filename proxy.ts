@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const publicPaths = ['/login', '/saas-admin'];
+  const publicPaths = ['/login', '/saas-admin', '/demo'];
   const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (isPublic) {
