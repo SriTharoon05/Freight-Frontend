@@ -104,28 +104,50 @@ export function Pager({
     </div>
   );
 }
-export function useDraft<T>(name: string, initial: T) {
+export function useDraft<T>(
+  name: string,
+  initial: T,
+  options?: { autoRestore?: boolean },
+) {
+  const autoRestore = options?.autoRestore ?? true;
   const user = useAuthStore((s) => s.user);
   const key = `freight:draft:${user?.tenant_id}:${user?.id}:${name}`;
   const [value, setValue] = useState(initial);
   const [loadedKey, setLoadedKey] = useState("");
   const initialValue = useRef(initial);
+  initialValue.current = initial;
   const ready = loadedKey === key;
   const [storageError, setStorageError] = useState("");
+  const [isRestored, setIsRestored] = useState(false);
+  const [savedDraft, setSavedDraft] = useState<T | null>(null);
   const skip = useRef(false);
   useEffect(() => {
     if (!user) return;
     skip.current = false;
     try {
       const raw = localStorage.getItem(key);
-      setValue(raw ? JSON.parse(raw) : initialValue.current);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setSavedDraft(parsed);
+        if (autoRestore) {
+          setValue(parsed);
+          setIsRestored(true);
+        } else {
+          setValue(JSON.parse(JSON.stringify(initialValue.current)));
+          setIsRestored(false);
+        }
+      } else {
+        setSavedDraft(null);
+        setValue(JSON.parse(JSON.stringify(initialValue.current)));
+        setIsRestored(false);
+      }
     } catch {
       setStorageError(
         "Draft storage is unavailable. Keep this page open until saved.",
       );
     }
     setLoadedKey(key);
-  }, [key, user]);
+  }, [key, user, autoRestore]);
   useEffect(() => {
     if (!ready || skip.current) return;
     try {
@@ -139,9 +161,52 @@ export function useDraft<T>(name: string, initial: T) {
     setValue,
     ready,
     storageError,
+    isRestored,
+    hasSavedDraft: Boolean(savedDraft),
+    restoreDraft: () => {
+      if (savedDraft) {
+        skip.current = false;
+        setValue(savedDraft);
+        setIsRestored(true);
+      }
+    },
+    discardDraft: () => {
+      skip.current = true;
+      try {
+        localStorage.removeItem(key);
+        localStorage.removeItem("new-job:");
+        localStorage.removeItem("freight:draft:new-job:");
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.includes("draft") && k.includes("new-job")) {
+            localStorage.removeItem(k);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      setSavedDraft(null);
+      setIsRestored(false);
+      setValue(JSON.parse(JSON.stringify(initialValue.current)));
+    },
     clear: () => {
       skip.current = true;
-      localStorage.removeItem(key);
+      try {
+        localStorage.removeItem(key);
+        localStorage.removeItem("new-job:");
+        localStorage.removeItem("freight:draft:new-job:");
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.includes("draft") && k.includes("new-job")) {
+            localStorage.removeItem(k);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      setSavedDraft(null);
+      setIsRestored(false);
+      setValue(JSON.parse(JSON.stringify(initialValue.current)));
     },
   };
 }
@@ -405,27 +470,41 @@ export function EntityAutocomplete({
                 : []),
             ].map(([key, name]) => (
               <Field key={key} label={name}>
-                <input
-                  className={inputClass}
-                  type={
-                    key === "password"
-                      ? "password"
-                      : key === "email"
-                        ? "email"
-                        : "text"
-                  }
-                  maxLength={key === "country" ? 2 : undefined}
-                  value={form[key] || ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      [key]:
-                        key === "country"
-                          ? e.target.value.toUpperCase()
-                          : e.target.value,
-                    })
-                  }
-                />
+                {key === "address" ? (
+                  <textarea
+                    rows={3}
+                    className={`${inputClass} resize-y min-h-[72px]`}
+                    value={form[key] || ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        [key]: e.target.value,
+                      })
+                    }
+                  />
+                ) : (
+                  <input
+                    className={inputClass}
+                    type={
+                      key === "password"
+                        ? "password"
+                        : key === "email"
+                          ? "email"
+                          : "text"
+                    }
+                    maxLength={key === "country" ? 2 : undefined}
+                    value={form[key] || ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        [key]:
+                          key === "country"
+                            ? e.target.value.toUpperCase()
+                            : e.target.value,
+                      })
+                    }
+                  />
+                )}
               </Field>
             ))}
             <ErrorBanner error={error} />
@@ -445,30 +524,69 @@ export function EntityAutocomplete({
 }
 export function ChargeSelect({
   value,
+  name,
   onChange,
   mode,
 }: {
   value: string;
-  onChange: (value: string, charge?: ChargeType) => void;
+  name?: string;
+  onChange: (value: string, charge?: ChargeType, customName?: string) => void;
   mode?: string;
 }) {
   const user = useAuthStore((s) => s.user);
+  const [customMode, setCustomMode] = useState(false);
+  const [customText, setCustomText] = useState(name || "");
   const { data, error } = useQuery<Page<ChargeType>>({
     queryKey: ["freight", user?.tenant_id, "charge-schedule"],
     queryFn: () => freight.get<Page<ChargeType>>("/charge-schedule"),
   });
+
+  const matching = data?.items.find((c: ChargeType) => c.id === value);
+
+  if (customMode || (!matching && !value && customText)) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          aria-label="Custom charge name"
+          placeholder="Charge name (e.g. Documentation)"
+          className={inputClass}
+          value={customText}
+          onChange={(e) => {
+            setCustomText(e.target.value);
+            onChange("", undefined, e.target.value);
+          }}
+        />
+        <button
+          type="button"
+          className="whitespace-nowrap px-1 text-[11px] font-semibold text-[#7068cf] hover:underline"
+          onClick={() => {
+            setCustomMode(false);
+            setCustomText("");
+            onChange("", undefined, "");
+          }}
+        >
+          Select
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <>
+    <div className="space-y-1">
       <select
-        required
         className={inputClass}
         value={value}
-        onChange={(e) =>
+        onChange={(e) => {
+          if (e.target.value === "__custom__") {
+            setCustomMode(true);
+            return;
+          }
           onChange(
             e.target.value,
             data?.items.find((c: ChargeType) => c.id === e.target.value),
-          )
-        }
+            undefined,
+          );
+        }}
       >
         <option value="">Select charge</option>
         {data?.items
@@ -478,8 +596,12 @@ export function ChargeSelect({
               {c.name}
             </option>
           ))}
+        {value && !data?.items.some((c: ChargeType) => c.id === value) && (
+          <option value={value}>{name || value}</option>
+        )}
+        <option value="__custom__">+ Enter custom charge name…</option>
       </select>
       <ErrorBanner error={error} />
-    </>
+    </div>
   );
 }

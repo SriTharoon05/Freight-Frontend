@@ -38,7 +38,7 @@ export function PartnerDirectory() {
     ],
     queryFn: () => partnerNetwork.partners(search, capability),
     enabled: !!user,
-    refetchInterval: 15000,
+    refetchInterval: (query) => (query.state.error ? 60000 : 15000),
   });
   const partnersData: Partner[] | undefined = result.data;
   const canOperate = operationalRoles.includes(user?.role || ""),

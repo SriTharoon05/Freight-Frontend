@@ -1,7 +1,10 @@
 "use client";
+
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "@/lib/api-client";
 import { freight, type Page, errorMessage, moneyLabel } from "@/lib/freight";
 import {
   Panel,
@@ -12,11 +15,15 @@ import {
   buttonClass,
   secondaryClass,
 } from "./shared";
+import { OutlookDraftButton } from "./outlook-draft-button";
+
 type Row = Record<string, any>;
+
 export function AuditPanel({ id }: { id: string }) {
   const client = useQueryClient();
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
   const [draft, setDraft] = useState("");
   const [bill, setBill] = useState({
     reference: "",
@@ -33,6 +40,40 @@ export function AuditPanel({ id }: { id: string }) {
     queryKey: ["freight", id, "audit-flags"],
     queryFn: () => freight.get<Page<Row>>(`/jobs/${id}/audit-flags`),
   });
+
+  const handleInvoiceFileOcr = async (file: File | undefined) => {
+    if (!file) return;
+    setOcrBusy(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await api.post<{
+        reference: string;
+        currency: string;
+        due_date: string;
+        lines: { name: string; amount: number }[];
+      }>(`/freight/jobs/${id}/audit-extract-file`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const data = res.data;
+      setBill((prev) => ({
+        ...prev,
+        reference: data.reference || prev.reference,
+        currency: data.currency || prev.currency,
+        due_date: data.due_date || prev.due_date,
+        lines: data.lines?.length ? data.lines : prev.lines,
+      }));
+      toast.success(
+        `Extracted ${data.lines?.length || 0} billed lines from ${file.name}`,
+      );
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
   const resolve = async (flag: Row, status: string) => {
     setBusy(true);
     setError(null);
@@ -50,13 +91,43 @@ export function AuditPanel({ id }: { id: string }) {
       setBusy(false);
     }
   };
+
   return (
     <Panel title="Carrier invoice audit">
       <ErrorBanner error={error || flags.error} />
-      <details className="mb-5">
+      <details className="mb-5" open>
         <summary className="cursor-pointer text-xs font-semibold text-[#7068cf]">
-          Audit carrier invoice
+          Audit carrier invoice (AI OCR or manual entry)
         </summary>
+
+        {/* InstaDoc / Expedock AI Carrier Invoice OCR Auto-Fill */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-[#c9c4eb] bg-[#f8f7fe] p-3.5 text-xs">
+          <div className="flex items-center gap-2 text-[#3a3852]">
+            <Sparkles className="h-4 w-4 shrink-0 text-[#7068cf]" />
+            <span>
+              <strong>AI Carrier Invoice Reader:</strong> Upload a PDF, Excel, or scanned invoice to auto-extract reference, currency, due date, and billed lines.
+            </span>
+          </div>
+          <label className={`${secondaryClass} cursor-pointer`}>
+            {ocrBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            {ocrBusy ? "Reading invoice…" : "Upload Invoice PDF / XLSX"}
+            <input
+              type="file"
+              accept=".pdf,.xlsx,.csv,.png,.jpg,.jpeg"
+              className="hidden"
+              disabled={ocrBusy}
+              onChange={(e) => {
+                void handleInvoiceFileOcr(e.target.files?.[0]);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </div>
+
         <form
           className="mt-4 space-y-4"
           onSubmit={async (e) => {
@@ -197,6 +268,7 @@ export function AuditPanel({ id }: { id: string }) {
           </div>
         </form>
       </details>
+
       <div className="space-y-3">
         {flags.data?.items.map((flag: Row) => (
           <article
@@ -269,7 +341,7 @@ export function AuditPanel({ id }: { id: string }) {
               onChange={(e) => setDraft(e.target.value)}
             />
           </Field>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               className={secondaryClass}
               onClick={async () => {
@@ -283,11 +355,11 @@ export function AuditPanel({ id }: { id: string }) {
             >
               Copy
             </button>
-            <span title="Email write endpoint is not connected">
-              <button className={buttonClass} disabled>
-                Send
-              </button>
-            </span>
+            <OutlookDraftButton
+              jobId={id}
+              body={draft}
+              label="Create Dispute Draft in Outlook"
+            />
           </div>
         </div>
       )}

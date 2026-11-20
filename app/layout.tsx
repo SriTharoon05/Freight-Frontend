@@ -4,7 +4,7 @@ import { Inter } from 'next/font/google';
 import { Providers } from './providers';
 export const dynamic = 'force-dynamic';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', preload: false });
 
 export const metadata: Metadata = {
   title: 'FreightOS · Operations',

@@ -187,7 +187,7 @@ export const analyticsApi = {
 // VENDOR INTELLIGENCE
 export const vendorIntelligenceApi = {
   laneStats: (params: { transport_mode?: string; origin_country?: string; dest_country?: string; page?: number; limit?: number }) =>
-    api.get<PaginatedLaneStats>('/vendor-intelligence/lane-stats', { params }).then((r) => r.data),
+    api.get<PaginatedLaneStats>('/vendor-intelligence/lane-stats', { params: { transport_mode: params.transport_mode || undefined, origin: params.origin_country || undefined, dest: params.dest_country || undefined, page: params.page, limit: params.limit } }).then((r) => r.data),
   suggest: (shipmentId: string) =>
     api.get<VendorSuggestion[]>(`/vendor-intelligence/suggest/${shipmentId}`).then((r) => r.data),
   autoAssign: (shipmentId: string, confirm: boolean) =>

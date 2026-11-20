@@ -35,6 +35,7 @@ import {
 } from "./shared";
 import { QueryFeedback } from "./query-feedback";
 import { PackingDocuments } from "./packing-documents";
+import { OutlookDraftButton } from "./outlook-draft-button";
 
 export type EmailRequest = {
   id: string;
@@ -106,6 +107,8 @@ export function EmailRequests({
   const [reviewCategory, setReviewCategory] =
     useState<keyof typeof mailCategories>("other");
   const [reviewPriority, setReviewPriority] = useState("medium");
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replyMessageId, setReplyMessageId] = useState("");
   const q = useDebouncedValue(search.trim());
   const permitted = [
     "sales",
@@ -630,6 +633,49 @@ export function EmailRequests({
             </SheetDescription>
           </SheetHeader>
           {conversation && <PackingDocuments conversationId={conversation.id} />}
+          {conversation && (
+            <div className="mt-5 rounded-xl border border-[#e3dff3] bg-[#faf9fe] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-[#1f2029]">
+                  Reply in same Outlook thread
+                </h3>
+                {!!messages.data?.items?.length && (
+                  <select
+                    aria-label="Reply target message"
+                    className={`${inputClass} !w-auto !py-1 text-xs`}
+                    value={replyMessageId}
+                    onChange={(e) => setReplyMessageId(e.target.value)}
+                  >
+                    <option value="">Latest inbound message in thread</option>
+                    {messages.data.items.map((m: Message) => (
+                      <option key={m.id} value={m.id}>
+                        {m.direction === "outbound" ? "Sent" : "From"} {m.from_address} · {dateLabel(m.received_at)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <textarea
+                rows={4}
+                aria-label="Outlook thread reply body"
+                className={`${inputClass} mt-2.5`}
+                placeholder={`Write reply to ${conversation.from_address}…`}
+                value={replyDraft}
+                onChange={(e) => setReplyDraft(e.target.value)}
+              />
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                <OutlookDraftButton
+                  conversationId={conversation.id}
+                  messageId={replyMessageId || undefined}
+                  body={replyDraft}
+                  label="Create Outlook draft (same thread)"
+                />
+                <span className="text-[11px] text-[#777884]">
+                  Preserves Outlook thread ID &amp; quoted history
+                </span>
+              </div>
+            </div>
+          )}
           <div className="mt-5 rounded-xl bg-[#f7f6fb] p-4">
             <h3 className="text-sm font-semibold">Review classification</h3>
             <p className="mb-3 mt-1 text-xs text-[#777884]">

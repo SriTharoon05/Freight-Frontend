@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+android/
+ios/
+.env
+dist/
+*.tsbuildinfo
+google-services.json
+GoogleService-Info.plist
+
+dist-ios/

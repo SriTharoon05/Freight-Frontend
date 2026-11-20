@@ -33,7 +33,7 @@ const csp = [
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: https:",
   `connect-src 'self' https://*.supabase.co https://api.mapbox.com wss://*.supabase.co${apiOrigin ? ` ${apiOrigin}` : ''}`,
-  "frame-src 'self' https://www.openstreetmap.org",
+  "frame-src 'self' blob: https://www.openstreetmap.org",
   "frame-ancestors 'none'",
   "object-src 'none'",
   "base-uri 'self'",

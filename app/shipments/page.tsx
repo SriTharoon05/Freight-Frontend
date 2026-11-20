@@ -147,6 +147,7 @@ export default function JobsPage() {
                     "ETA",
                     "Status",
                     "D&D",
+                    "Actions",
                   ].map((h) => (
                     <th className="px-3 py-3" key={h}>
                       {h}
@@ -194,6 +195,22 @@ export default function JobsPage() {
                       className={`px-3 text-[10px] ${["overdue", "critical"].includes(job.dd_risk) ? "font-semibold text-red-600" : "text-[#858693]"}`}
                     >
                       {job.dd_risk}
+                    </td>
+                    <td className="px-3">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          className={secondaryClass}
+                          href={job.is_draft ? `/shipments/new?draft=${job.id}` : `/shipments/new?edit=${job.id}`}
+                        >
+                          Edit
+                        </Link>
+                        <Link
+                          className="text-xs text-[#7068cf] hover:underline"
+                          href={job.is_draft ? `/shipments/new?draft=${job.id}` : `/shipments/${job.id}`}
+                        >
+                          View
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

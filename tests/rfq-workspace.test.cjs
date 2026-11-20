@@ -100,6 +100,12 @@ function screen(file, component, props = {}, dataOverrides = {}) {
         useEffect(effect) {
           effects.push(effect);
         },
+        useMemo(fn) {
+          return fn();
+        },
+        useRef(initial) {
+          return { current: initial };
+        },
         useState(initial) {
           const index = hook++;
           if (!(index in states))
@@ -153,20 +159,18 @@ function screen(file, component, props = {}, dataOverrides = {}) {
             user: { id: "user-one", tenant_id: "company-one", role: "admin", full_name: "Sanjit Sharma" },
           }),
       };
-    if (name === "@/lib/freight")
+    if (name === "@/lib/freight") {
+      const realFreight = compile("lib/freight.ts", (dep) => dep === "./api-client" ? { api: {} } : require(dep));
       return {
+        ...realFreight,
         freight,
         dateLabel: String,
         moneyLabel: (value, currency) => `${currency} ${value}`,
         errorMessage: String,
-        blankCargo: () => ({}),
-        blankDimensionItem: () => ({ pieces: 1, length: 0, width: 0, height: 0, unit: "cm", gross_weight: 0, volume: 0, volumetric_weight: 0 }),
-        calcDimensionItem: () => ({ volume: 0, volumetric_weight: 0 }),
-        formatDimensions: () => "",
-        parseDimensionsString: () => [{ pieces: 1, length: 0, width: 0, height: 0, unit: "cm", gross_weight: 0, volume: 0, volumetric_weight: 0 }],
         mawbWarning: () => null,
         localDateInput: (value) => value?.slice(0, 16) || "",
       };
+    }
     if (name === "@/lib/mail-triage")
       return compile("lib/mail-triage.ts", require);
     if (name === "@/lib/email-draft")
@@ -197,14 +201,41 @@ function screen(file, component, props = {}, dataOverrides = {}) {
       return { EmailRequests: () => null };
     if (name === "./packing-documents")
       return { PackingDocuments: () => null };
+    if (name === "@/components/freight/dashboard-visuals" || name === "./dashboard-visuals")
+      return compile("components/freight/dashboard-visuals.tsx", (dep) => {
+        if (dep === "react") return { ...React, useState: (init) => [typeof init === "function" ? init() : init, () => {}] };
+        if (dep === "next/link") return { __esModule: true, default: (pr) => React.createElement("a", pr, pr.children) };
+        return require(dep);
+      });
+    if (name === "@/components/freight/outlook-draft-button" || name === "./outlook-draft-button")
+      return compile("components/freight/outlook-draft-button.tsx", (dep) => {
+        if (dep === "react") return { ...React, useState: (init) => [typeof init === "function" ? init() : init, () => {}] };
+        if (dep === "sonner") return { toast: { success() {}, error() {} } };
+        if (dep === "@/lib/freight") return { freight, errorMessage: String };
+        if (dep === "./shared") return { buttonClass: "btn", secondaryClass: "sec" };
+        return require(dep);
+      });
     if (name === "@/components/freight/milestone-board")
       return { MilestoneBoard: () => null };
     if (name === "@/components/freight/cargo-details-editor")
       return { CargoDetailsEditor: () => null };
+    if (name === "@/components/freight/rfq-cargo-editor")
+      return { RfqCargoEditor: () => null };
+    if (name === "@/lib/api-client")
+      return { api: { post: async () => ({ data: "<html></html>" }) } };
     if (name === "@/components/freight/transport-price-quote")
       return { TransportPriceQuoteModal: () => null };
     if (name === "@/components/freight/supplier-rate-suggestions")
       return { SupplierRateSuggestions: () => null, RateCardSuggestions: () => null };
+    if (name === "./location-autocomplete" || name === "@/components/freight/location-autocomplete")
+      return {
+        LocationAutocomplete: (props) =>
+          React.createElement("input", {
+            "data-testid": "location-autocomplete",
+            value: props.value,
+            onChange: (e) => props.onChange(e.target.value),
+          }),
+      };
     if (name === "next/navigation")
       return {
         useRouter: () => ({
@@ -806,4 +837,309 @@ test("RFQ workspace exposes transport price quote document trigger and modal sup
   button(tree, "Prepared RFQs").props.onClick();
   tree = ui.render();
   assert.ok(text(tree).includes("Transport Quote"));
+});
+
+test("Rate card buy calculation supports per_kg, per_lb, per_m3, per_shipment and markup/margin", () => {
+  const { calculateRateBuyAmount, calculateSellFromBuy, formatRateUnitLabel, LB_PER_KG } = compile("lib/freight.ts", (dep) => dep === "./api-client" ? { api: {} } : require(dep));
+  assert.equal(formatRateUnitLabel("per_kg"), "/ kg");
+  assert.equal(formatRateUnitLabel("per_lb"), "/ lb");
+  assert.equal(formatRateUnitLabel("per_m3"), "/ m³");
+
+  const kgBuy = calculateRateBuyAmount({ rate_unit: "per_kg", unit_rate_paise: 250, base_rate_paise: 2500 }, 100, 1.5);
+  assert.equal(kgBuy, 275);
+
+  const lbBuy = calculateRateBuyAmount({ rate_unit: "per_lb", unit_rate_paise: 100, base_rate_paise: 0 }, 100, 1.5);
+  assert.equal(lbBuy, Number((100 * LB_PER_KG).toFixed(2)));
+
+  const m3Buy = calculateRateBuyAmount({ rate_unit: "per_m3", unit_rate_paise: 8000, base_rate_paise: 0 }, 100, 2.5);
+  assert.equal(m3Buy, 200);
+
+  assert.equal(calculateSellFromBuy(200, 20, "margin"), 250);
+  assert.equal(calculateSellFromBuy(200, 20, "markup"), 240);
+  assert.equal(calculateSellFromBuy(200, 35, "fixed"), 235);
+});
+
+test("QuoteEditor applies settings profit margin, documentation fee, and builds quote lines", () => {
+  const ui = screen("app/rfqs/page.tsx", "QuoteEditor", {
+    rfq: { id: "rfq-s1", reference: "RFQ-SET-1", mode: "air", origin: "IN", destination: "AE", form: {} },
+    close() {},
+    onOpenQuoteDoc() {},
+  }, {
+    queryData: {
+      settings: {
+        minimum_margin_percent: 10,
+        default_profit_margin_percent: 20,
+        default_pricing_method: "markup",
+        default_documentation_fee: 75,
+        default_documentation_currency: "USD",
+        default_quote_currency: "USD",
+        default_quote_tax_percent: 5,
+        default_quote_validity_days: 14,
+      },
+      "charge-schedule": {
+        items: [
+          { id: "ct-air", name: "Air Freight" },
+          { id: "ct-doc", name: "Documentation Fee" },
+        ],
+      },
+      "rfq-rates": {
+        items: [
+          { id: "rc-kg", carrier_name: "Emirates", origin_country_code: "IN", dest_country_code: "AE", transport_mode: "air", rate_unit: "per_kg", unit_rate_paise: 300, base_rate_paise: 0, per_kg_rate_paise: 300, per_cbm_rate_paise: 0, currency_code: "USD" },
+        ],
+        total: 1,
+      },
+    },
+  });
+  let tree = ui.render();
+  ui.flushEffects();
+  tree = ui.render();
+  const weightField = nodes(tree).find(node => node.props?.label === "Chargeable weight (kg)");
+  weightField.props.children.props.onChange({ target: { value: "100" } });
+  tree = ui.render();
+  const rateSection = nodes(tree).find(node => node.props?.data?.items?.[0]?.id === "rc-kg" && node.props?.onApply);
+  rateSection.props.onApply(rateSection.props.data.items[0]);
+  tree = ui.render();
+  assert.equal(control(tree, "Sell price").props.value, 360);
+  button(tree, "Apply freight + doc fee to quote lines").props.onClick();
+  tree = ui.render();
+  assert.match(text(tree), /Air Freight/);
+  assert.match(text(tree), /Documentation Fee/);
+});
+
+test("RfqCargoEditor renders editable commodities, calculates chargeable weight, and allows adding a commodity", () => {
+  let cargoState = [{
+    description: "Valves",
+    pieces: 10,
+    gross_weight: 80,
+    net_weight: 0,
+    weight_unit: "kg",
+    chargeable_weight: 100,
+    rate_class: "Q",
+    commodity_number: "",
+    rate: 0,
+    dimensions: "10 @ 50x40x30 cm",
+    marks: "",
+    volume: 0.6,
+    volumetric_weight: 100,
+    dimension_items: [{ pieces: 10, length: 50, width: 40, height: 30, unit: "cm", gross_weight: 80, volume: 0.6, volumetric_weight: 100 }],
+  }];
+  const realMod = compile("components/freight/rfq-cargo-editor.tsx", (name) => {
+    if (name === "react") return React;
+    if (name === "lucide-react") return { Plus: () => null, RotateCcw: () => null, Trash2: () => null };
+    if (name === "@/lib/freight") return compile("lib/freight.ts", (dep) => dep === "./api-client" ? { api: {} } : require(dep));
+    if (name === "./cargo-details-editor") return { CargoDetailsEditor: () => null };
+    if (name === "./shared") return { Field: (p) => p.children, inputClass: "", secondaryClass: "" };
+    return require(name);
+  });
+  let cwValue = "100.00";
+  const renderEditor = () => realMod.RfqCargoEditor({
+    mode: "air",
+    airDivisor: "standard",
+    onAirDivisorChange() {},
+    cargo: cargoState,
+    onChangeCargo(next) { cargoState = next; },
+    totalChargeableWeight: cwValue,
+    chargeableWeightManual: false,
+    onChangeChargeableWeight(v) { cwValue = v; },
+    cargoNotes: "",
+    onChangeCargoNotes() {},
+    hasAiPrefill: true,
+  });
+  let tree = renderEditor();
+  assert.match(text(tree), /Commodity 1/);
+  assert.equal(control(tree, "Commodity 1 row 1 pieces").props.value, 10);
+  button(tree, "Add commodity").props.onClick();
+  assert.equal(cargoState.length, 2);
+  tree = renderEditor();
+  assert.match(text(tree), /Commodity 2/);
+});
+
+test("TransportPriceQuoteModal exposes PDF Preview tab and cargo schedule", () => {
+  const ui = screen("components/freight/transport-price-quote.tsx", "TransportPriceQuoteModal", {
+    rfq: {
+      id: "rfq-pdf-1",
+      reference: "RFQ-PDF-001",
+      mode: "air",
+      origin: "BOM",
+      destination: "DXB",
+      customer_name: "Atlas Trading",
+      form: {
+        cargo_items: [{
+          description: "Machine Parts",
+          pieces: 5,
+          gross_weight: 120,
+          weight_unit: "kg",
+          volume: 0.9,
+          volumetric_weight: 150,
+          chargeable_weight: 150,
+          dimensions: "5 @ 60x50x60 cm",
+        }],
+        total_chargeable_weight: 150,
+      },
+    },
+  });
+  const tree = ui.render();
+  assert.ok(button(tree, "PDF Preview"));
+  assert.ok(button(tree, "Download PDF"));
+  assert.match(text(tree), /Machine Parts/);
+  assert.match(text(tree), /150\.00 kg/);
+});
+
+
+test("recalculateCommodityCargo updates volumetric and chargeable weight across mode and divisor switches, and formatters never throw RangeError", () => {
+  const realFreight = compile("lib/freight.ts", (dep) => dep === "./api-client" ? { api: {} } : require(dep));
+  const baseRow = {
+    description: "Machinery",
+    pieces: 1,
+    gross_weight: 200,
+    net_weight: 180,
+    weight_unit: "kg",
+    chargeable_weight: 200,
+    rate_class: "Q",
+    commodity_number: "",
+    rate: 0,
+    dimensions: "1 @ 120x100x100 cm",
+    marks: "",
+    volume: 1.2,
+    volumetric_weight: 200,
+    dimension_items: [{ pieces: 1, length: 120, width: 100, height: 100, unit: "cm", gross_weight: 200 }],
+  };
+
+  // Air standard (/6000): 1.2 CBM -> 200 kg volumetric
+  const airStd = realFreight.recalculateCommodityCargo(baseRow, baseRow.dimension_items, "air", "standard");
+  assert.equal(airStd.volumetric_weight, 200);
+  assert.equal(airStd.chargeable_weight, 200);
+
+  // Air express (/5000): 1.2 CBM -> 240 kg volumetric (> 200 kg gross)
+  const airExp = realFreight.recalculateCommodityCargo(airStd, airStd.dimension_items, "air", "express");
+  assert.equal(airExp.volumetric_weight, 240);
+  assert.equal(airExp.chargeable_weight, 240);
+
+  // Switch to Ocean (1 CBM = 1000 kg): 1.2 CBM -> 1200 kg volumetric
+  const oceanRow = realFreight.recalculateCommodityCargo(airExp, airExp.dimension_items, "ocean", "standard");
+  assert.equal(oceanRow.volumetric_weight, 1200);
+  assert.equal(oceanRow.chargeable_weight, 1200);
+
+  // Switch to Road (1 CBM = 333.33 kg): 1.2 CBM -> 400 kg volumetric
+  const roadRow = realFreight.recalculateCommodityCargo(oceanRow, oceanRow.dimension_items, "road", "standard");
+  assert.equal(roadRow.volumetric_weight, 400);
+  assert.equal(roadRow.chargeable_weight, 400);
+
+  // Safe currency/date formatting on partial user input in QuoteEditor
+  assert.equal(realFreight.moneyLabel(125.5, "U"), "U 125.50");
+  assert.equal(realFreight.dateLabel("not-a-valid-date"), "—");
+  assert.equal(realFreight.localDateInput("not-a-valid-date"), "");
+});
+
+test("Control Tower multi-dashboard switcher renders Operations, Exceptions, Sales, Finance, and Team visual analytics", async () => {
+  const ui = screen("app/dashboard/page.tsx", "default", {}, {
+    queryData: {
+      dashboard: {
+        open_jobs: 42,
+        completed: 118,
+        overdue_milestones: 3,
+        pending_documents: 2,
+        alerts: 4,
+        critical_mail_count: 1,
+        overview_kpis: {
+          total_shipments: 160,
+          active_delta_pct: 14.5,
+          on_time_departure_pct: 93.4,
+          on_time_arrival_pct: 91.2,
+          avg_transit_days: 12.8,
+          dd_at_risk: 5,
+          dd_overdue: 1,
+          delayed_shipments: 3,
+          total_weight_kg: 84500,
+          total_volume_cbm: 312.4,
+          total_containers: 28,
+          doc_compliance_pct: 98.8,
+        },
+        lifecycle_pipeline: [
+          { key: "origin", label: "Booking & Origin", count: 8, share_pct: 5 },
+          { key: "export_ops", label: "Customs & Gate-In", count: 10, share_pct: 6.3 },
+          { key: "in_transit", label: "Mainline In-Transit", count: 16, share_pct: 10 },
+          { key: "arrival_clearance", label: "Arrival & Clearance", count: 8, share_pct: 5 },
+          { key: "delivered", label: "Delivered", count: 118, share_pct: 73.7 },
+        ],
+        lane_performance: [
+          { origin_code: "SHA", origin_name: "Shanghai", dest_code: "BOM", dest_name: "Mumbai", mode: "ocean", shipments: 24, on_time_pct: 94.2, at_risk: 1, avg_transit_days: 16 },
+          { origin_code: "BOM", origin_name: "Mumbai", dest_code: "DXB", dest_name: "Dubai", mode: "air", shipments: 18, on_time_pct: 88.9, at_risk: 2, avg_transit_days: 2.1 },
+        ],
+        monthly_trends: [
+          { month: "2026-09", label: "Sep 26", shipments: 22, delivered: 19, in_transit: 3, delayed: 1, rfqs: 30, won_rfqs: 12, sell_usd: 48000, buy_usd: 38000, profit_usd: 10000 },
+          { month: "2026-10", label: "Oct 26", shipments: 28, delivered: 24, in_transit: 4, delayed: 2, rfqs: 36, won_rfqs: 15, sell_usd: 62000, buy_usd: 47500, profit_usd: 14500 },
+        ],
+        carrier_performance: [
+          { id: "c1", name: "Maersk", departures: 30, on_time: 28, on_time_percent: 93.3 },
+        ],
+        exception_summary: {
+          total: 13,
+          severity: { high: 5, medium: 6, low: 2 },
+          by_category: [
+            { key: "overdue_milestones", label: "Overdue vendor milestones", count: 3, severity: "high", href: "/milestones" },
+          ],
+          recent_exceptions: [
+            { id: "esc-1", shipment_id: "s-1", shipment_ref: "SHP-901", customer: "Atlas Exports", route: "SHA → BOM", type: "dd_risk", triggered_at: "2026-11-18T10:00:00Z", severity: "high", href: "/shipments/s-1?tab=Milestones" },
+          ],
+        },
+        rfq_stages: { new: 9, quote_draft: 4, quoted: 11, accepted: 3, won: 15, lost: 5, no_rate: 2 },
+        average_response_hours: 6.4,
+        win_by_mode: [{ name: "ocean", won: 10, decided: 14 }],
+        loss_reasons: [{ name: "rate_too_high", count: 3 }],
+        charges_usd: { sell: 110000, buy: 85500 },
+        issued_revenue_usd: { month: 62000, quarter: 145000, year: 490000 },
+        invoices_by_status: { paid: 18, sent: 6, issued: 3, draft: 2 },
+        receivables_aging_usd: { "0–30": 21000, "30–60": 8000, "60–90": 2500, "90+": 1200 },
+        workload_threshold: 15,
+      },
+      workload: {
+        items: [
+          { id: "u-1", name: "Aarav Rao", role: "ops_manager", open_jobs: 12, overdue: 1, alerts: 0, departing_48h: 3, risk: "amber", by_status: { in_transit: 8, booked: 4 } },
+        ],
+        total: 1,
+      },
+    },
+  });
+
+  function deepText(node) {
+    if (node == null || typeof node === "boolean") return "";
+    if (typeof node !== "object") return String(node);
+    if (Array.isArray(node)) return node.map(deepText).join("");
+    if (typeof node.type === "function") return deepText(node.type(node.props || {}));
+    return deepText(node.props?.children);
+  }
+  const tabButton = (t, prefix) =>
+    nodes(t).find((n) => n.type === "button" && text(n).trim().startsWith(prefix));
+
+  // 1. Default Operations Control Tower
+  let tree = ui.render();
+  assert.match(deepText(tree), /Freight Forwarding Command Center/);
+  assert.match(deepText(tree), /93\.4%/);
+  assert.match(deepText(tree), /Active Freight Corridors/);
+  assert.match(deepText(tree), /Maersk/);
+
+  // 2. Switch to Exceptions & Risk Desk
+  tabButton(tree, "Exceptions & Risk").props.onClick();
+  tree = ui.render();
+  assert.match(deepText(tree), /Overdue vendor milestones/);
+  assert.match(deepText(tree), /SHP-901/);
+
+  // 3. Switch to Commercial & RFQ Desk
+  tabButton(tree, "Commercial & RFQ").props.onClick();
+  tree = ui.render();
+  assert.match(deepText(tree), /6\.4h/);
+  assert.match(deepText(tree), /Decided RFQ Win Rate/);
+
+  // 4. Switch to Executive Finance
+  tabButton(tree, "Executive Finance").props.onClick();
+  tree = ui.render();
+  assert.match(deepText(tree), /Gross Margin %/);
+  assert.match(deepText(tree), /USD 24500/);
+
+  // 5. Switch to Team Capacity
+  tabButton(tree, "Team Capacity").props.onClick();
+  tree = ui.render();
+  assert.match(deepText(tree), /Aarav Rao/);
+  assert.match(deepText(tree), /12 \/ 15 jobs \(80%\)/);
 });

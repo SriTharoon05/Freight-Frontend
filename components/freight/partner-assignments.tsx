@@ -285,13 +285,13 @@ export function PartnerAssignments({ job }: { job: Job }) {
     queryKey: key,
     queryFn: () => partnerNetwork.tasks(job.id),
     enabled: !!user,
-    refetchInterval: 15_000,
+    refetchInterval: (query) => (query.state.error ? 60_000 : 15_000),
   });
   const partners = useQuery<Partner[]>({
     queryKey: ["partner-network", user?.tenant_id, user?.id, "agents"],
     queryFn: () => partnerNetwork.partners(),
     enabled: !!user,
-    refetchInterval: 15_000,
+    refetchInterval: (query) => (query.state.error ? 60_000 : 15_000),
   });
   const documents = useQuery<
     Page<{ id: string; document_type: string; document_number?: string }>
@@ -313,7 +313,7 @@ export function PartnerAssignments({ job }: { job: Job }) {
     queryKey: [...key, selectedTask],
     queryFn: () => partnerNetwork.task(job.id, selectedTask!),
     enabled: !!selectedTask,
-    refetchInterval: 15_000,
+    refetchInterval: (query) => (query.state.error ? 60_000 : 15_000),
   });
   const tasksData: NetworkList<NetworkTask> | undefined = tasks.data;
   const partnersData: Partner[] | undefined = partners.data;
@@ -434,34 +434,82 @@ export function PartnerAssignments({ job }: { job: Job }) {
           </p>
         )}
         <div className="space-y-3">
-          {tasksData?.items.map((task) => (
-            <article
-              key={task.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"
-            >
-              <div>
-                <p className="text-sm font-semibold">
-                  {taskLabels[task.kind]} ·{" "}
-                  {partnersData?.find(
-                    (partner) => partner.id === task.partner_id,
-                  )?.name || "Assigned partner"}
-                </p>
-                <p className="mt-1 text-xs text-[#777884]">
-                  {dateLabel(task.scheduled_at)} ·{" "}
-                  {task.status.replaceAll("_", " ")}
-                </p>
-              </div>
-              <button
-                className={secondaryClass}
-                onClick={() => {
-                  setSelectedTask(task.id);
-                  setReason("");
-                }}
+          {tasksData?.items.map((task: any) => {
+            const loc = task.last_location;
+            const stale =
+              !loc?.captured_at ||
+              Date.now() - new Date(loc.captured_at).getTime() > 180_000;
+            const milestone =
+              task.completion?.latest_milestone ||
+              task.progress_event?.payload?.milestone ||
+              task.status;
+            const eta = task.completion?.driver_eta || task.driver_eta;
+            return (
+              <article
+                key={task.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e7e5f3] bg-[#fbfbfe] p-4"
               >
-                View task and proof
-              </button>
-            </article>
-          ))}
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-[#171725]">
+                      {taskLabels[task.kind as TaskKind]} ·{" "}
+                      {partnersData?.find(
+                        (partner) => partner.id === task.partner_id,
+                      )?.name || "Assigned partner"}
+                    </p>
+                    <span className="rounded-full bg-[#eeecfd] px-2.5 py-0.5 text-[10px] font-bold uppercase text-[#5c53c2]">
+                      {String(milestone).replaceAll("_", " ")}
+                    </span>
+                    {loc && (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          stale
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-emerald-100 text-emerald-800"
+                        }`}
+                      >
+                        {stale ? "GPS Delayed" : "GPS Live"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#777884]">
+                    Scheduled {dateLabel(task.scheduled_at)} · Status:{" "}
+                    <strong className="capitalize text-[#343444]">
+                      {task.status.replaceAll("_", " ")}
+                    </strong>
+                    {eta ? ` · Driver ETA: ${dateLabel(eta)}` : ""}
+                  </p>
+                  {task.driver && (
+                    <p className="text-xs font-medium text-[#3d3e4e]">
+                      Driver: {task.driver.name} · {task.driver.phone}
+                      {task.driver.vehicle ? ` · ${task.driver.vehicle}` : ""}
+                    </p>
+                  )}
+                  {loc && (
+                    <p className="text-xs text-[#545568]">
+                      Location:{" "}
+                      <strong>
+                        {loc.location_note ||
+                          (loc.area?.name ? `Near ${loc.area.name}` : `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`)}
+                      </strong>{" "}
+                      · ±{Math.round(Number(loc.accuracy || 0))}m
+                      {typeof loc.speed_kmh === "number" ? ` · ${loc.speed_kmh} km/h` : ""}
+                      {" · "}Updated {dateLabel(loc.captured_at)}
+                    </p>
+                  )}
+                </div>
+                <button
+                  className={secondaryClass}
+                  onClick={() => {
+                    setSelectedTask(task.id);
+                    setReason("");
+                  }}
+                >
+                  View task and proof
+                </button>
+              </article>
+            );
+          })}
         </div>
       </Panel>
       {detailData && (

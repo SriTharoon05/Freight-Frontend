@@ -1,5 +1,5 @@
 [build]
-command = "next build --webpack"
+command = "npm run build"
 publish = ".next"
 
 [functions]

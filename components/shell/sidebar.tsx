@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useAuthStore } from "@/lib/auth-store";
 import {
   LayoutDashboard,
   Package,
@@ -14,6 +15,7 @@ import {
   BookUser,
   Receipt,
   Clock,
+  Sparkles,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -37,6 +39,7 @@ export const navigationGroups = [
       { label: "Rate Management", href: "/rates", icon: Gauge },
       { label: "Invoice & Audit", href: "/invoice-audit", icon: Receipt },
       { label: "D&D Watch", href: "/dd-watch", icon: Clock },
+      { label: "AI Suite & Customs", href: "/ai-tools", icon: Sparkles },
     ],
   },
   {
@@ -49,7 +52,27 @@ export const navigationGroups = [
 ];
 export function Sidebar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const user = useAuthStore((s) => s.user);
   const [collapsed, setCollapsed] = useState(false);
+  const canFinance = ["finance", "admin", "org_admin", "manager", "ops_manager"].includes(
+    user?.role || "",
+  );
+  const canManage = ["admin", "org_admin", "manager", "ops_manager"].includes(
+    user?.role || "",
+  );
+  const activeDashView = searchParams?.get("view") || "Operations";
+  const dashboardSubItems = [
+    { label: "Operations Control", view: "Operations", href: "/dashboard" },
+    { label: "Exceptions & Risk", view: "Exceptions", href: "/dashboard?view=Exceptions" },
+    { label: "Commercial & RFQ", view: "Sales", href: "/dashboard?view=Sales" },
+    ...(canFinance
+      ? [{ label: "Executive Finance", view: "Finance", href: "/dashboard?view=Finance" }]
+      : []),
+    ...(canManage
+      ? [{ label: "Team Capacity", view: "Team", href: "/dashboard?view=Team" }]
+      : []),
+  ];
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem("freight:sidebar") === "collapsed");
@@ -100,22 +123,45 @@ export function Sidebar() {
           )}
           <nav aria-label={group.label} className="space-y-1">
             {group.items.map(({ label, href, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                title={collapsed ? label : undefined}
-                aria-label={label}
-                aria-current={pathname === href ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-3 text-xs font-medium",
-                  pathname === href || pathname.startsWith(href + "/")
-                    ? "bg-[#e9e6fb] text-[#655dc4]"
-                    : "text-[#777884] hover:bg-white",
+              <div key={href}>
+                <Link
+                  href={href}
+                  title={collapsed ? label : undefined}
+                  aria-label={label}
+                  aria-current={pathname === href ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-3 text-xs font-medium",
+                    pathname === href || pathname.startsWith(href + "/")
+                      ? "bg-[#e9e6fb] text-[#655dc4]"
+                      : "text-[#777884] hover:bg-white",
+                  )}
+                >
+                  <Icon size={17} className="shrink-0" />
+                  {!collapsed && label}
+                </Link>
+                {!collapsed && href === "/dashboard" && (
+                  <div className="ml-6 mt-1 space-y-0.5 border-l border-[#dedaf2] pl-3">
+                    {dashboardSubItems.map((sub) => {
+                      const subActive =
+                        pathname === "/dashboard" && activeDashView === sub.view;
+                      return (
+                        <Link
+                          key={sub.view}
+                          href={sub.href}
+                          className={cn(
+                            "block rounded-lg px-2.5 py-1.5 text-[11px] transition",
+                            subActive
+                              ? "bg-white font-semibold text-[#655dc4] shadow-[0_1px_4px_rgba(23,23,37,0.05)]"
+                              : "text-[#7f8090] hover:bg-white/70 hover:text-[#343444]",
+                          )}
+                        >
+                          {sub.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-              >
-                <Icon size={17} className="shrink-0" />
-                {!collapsed && label}
-              </Link>
+              </div>
             ))}
           </nav>
         </div>

@@ -273,18 +273,30 @@ export interface PaginatedCustomers {
   limit: number;
 }
 
+export type RateUnit = 'per_kg' | 'per_lb' | 'per_m3' | 'per_cbm' | 'per_shipment' | 'per_container';
+
 export interface RateCard {
   id: string;
   carrier_id?: string;
   carrier_name?: string;
   origin: string;
   destination: string;
-  mode: 'ocean' | 'air' | 'road' | 'rail';
+  origin_country_code?: string;
+  dest_country_code?: string;
+  mode: 'ocean' | 'air' | 'road' | 'rail' | 'multimodal';
+  transport_mode?: string;
   base_rate_paise: number;
+  per_kg_rate_paise?: number;
+  per_cbm_rate_paise?: number;
+  per_lb_rate_paise?: number;
+  rate_unit?: RateUnit;
+  unit_rate_paise?: number;
+  currency_code?: string;
   markup_percent: number;
   valid_from: string;
   valid_until?: string;
   active: boolean;
+  is_active?: boolean;
   lane_volatile?: boolean;
   created_at: string;
 }

@@ -72,7 +72,7 @@ export function PartnerWarehouseRequests({ job }: { job: Job }) {
   const list = useQuery<NetworkList<SpaceEnquiry>>({
     queryKey: key,
     queryFn: () => partnerNetwork.space(job.id),
-    refetchInterval: 15000,
+    refetchInterval: (query) => (query.state.error ? 60000 : 15000),
   });
   const [city, setCity] = useState(""),
     [facility, setFacility] = useState("");

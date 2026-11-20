@@ -1,0 +1,65 @@
+FREIGHT CLASSIFICATION POLICY V3 AND RFQ PIPELINE UPDATE
+
+Deploy the updated backend before this frontend source ZIP. The frontend now
+uses categories, priorities and workflow queues; an older backend will not apply
+those parameters. Apply backend migration 0012 before starting the new API.
+For the existing Docker entrypoint set RUN_MIGRATIONS_ON_START=true, or use the
+normal alembic upgrade head deployment step. Keep MAILBOX_POLLING_MODE=api.
+
+Use your existing production Netlify environment values and Next.js build:
+  NEXT_PUBLIC_API_BASE_URL=https://freight-backend-fibk.onrender.com/api/v1
+  NEXT_PUBLIC_USE_MOCK=false
+  NEXT_PUBLIC_SUPABASE_URL=<your public Supabase project URL>
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=<your anon/publishable key>
+
+Preserve the existing private mailbox scheduler settings. See
+AUTOMATIC-INBOX-SETUP.txt for the protected scheduler configuration.
+
+After deployment, verify:
+1. RFQ emails opens first and only shows conversations requesting a quote.
+2. Replied changes the results; selecting an inbox limits its conversations.
+3. Prepared RFQs has separate stage, mode and search filters.
+4. Conversation and quote drawers open; preparing an email includes its text.
+5. Phone navigation opens and closes after selecting a destination.
+6. Other emails has Networking & events (one merged category), sales/business
+   development, rate/surcharge circulars, lane/service advisories, shipment
+   operations, shipping documentation, finance/payments and general mail. Priority
+   and category filters work; critical mail sorts first.
+7. Sending a selling quote records Quote sent but keeps the thread in RFQ.
+   A reply from the requesting customer moves the whole thread to Potential
+   jobs. Customer acceptance moves it to Jobs to create. Carrier replies and
+   buying-rate enquiries do not advance the sales pipeline; shipment-specific
+   carrier/agent rates belong in Operations. General tariffs belong in Rate
+   & surcharge circulars. Only the actual requesting party can accept a quote.
+   Preparing a draft or an ordinary acknowledgement does not count as sending.
+8. Review & create job opens the full job form with confirmation context. A
+   staff member must verify and save the job. Repeated submissions cannot
+   create another job from the same conversation.
+9. Conversation drawers allow audited category/priority corrections and reset.
+   Corrections persist during later syncs. Classification evidence, category
+   definitions and Needs review badges explain insufficient/conflicting evidence.
+10. Invoice settlement stays in Finance even when a surcharge is mentioned.
+    Commercial invoices/packing lists requested for customs are Documentation.
+    A booked container being rolled is Operations, not a general lane advisory.
+    Marketing urgency does not automatically make a message Critical.
+
+Stored conversations are automatically reclassified in bounded batches after
+backend deployment (version 3). No new schema migration beyond 0012 is needed.
+The UI shows how many remain. Do not reconnect the mailbox
+or change the import cutoff just for this update; Graph cursors are preserved.
+Quote and confirmation tracking needs the actual replies to be visible in a
+connected Inbox/Sent Items, or copied into a connected mailbox. Unusual wording
+can need team review. Existing prepared RFQs and jobs are preserved.
+Attachment contents are not parsed for intent; attachment-only requests require
+review. Previously reviewed Event categories are preserved as Networking & events.
+
+Read requests allow up to 90 seconds for cold starts. Temporary read failures
+have bounded retries; obsolete filter requests are canceled. Background refresh
+failures preserve the loaded list and show a local retry notice. Timed-out writes
+are not replayed automatically; verify the result before repeating a write.
+
+Render Free can sleep and does not provide production uptime guarantees. This
+update improves the app's recovery and usability; continuous production service
+requires an always-running backend and operational monitoring.
+
+This package is a source build, not a static HTML drag-and-drop export.

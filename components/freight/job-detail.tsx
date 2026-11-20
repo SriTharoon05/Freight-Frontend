@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, Printer, Plus, Trash2 } from "lucide-react";
+import { Copy, Download, ExternalLink, MapPin, Navigation, Printer, Plus, Share2, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import {
@@ -21,6 +21,8 @@ import { AuditPanel } from "./audit-panel";
 import { PartnerAssignments } from "./partner-assignments";
 import { PartnerWarehouseRequests } from "./partner-warehouse-requests";
 import { MilestoneBoard } from "./milestone-board";
+import { OutlookDraftButton } from "./outlook-draft-button";
+import { partnerNetwork, taskLabels, type NetworkList, type NetworkTask } from "@/lib/partner-network";
 import {
   EntityAutocomplete,
   ChargeSelect,
@@ -94,7 +96,24 @@ export function JobDetail({ id }: { id: string }) {
           </p>
           <p className="mt-2 text-xs text-[#777884]">Created by: {data.created_by?.name || "Not recorded"} · Last edited by: {data.last_edited_by?.name || "Not recorded"}</p>
         </div>
-        <div className="flex gap-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            className={secondaryClass}
+            onClick={async () => {
+              try {
+                const share = await freight.get<{ path: string }>(`/jobs/${id}/tracking-share`);
+                const url = `${window.location.origin}${share.path}`;
+                await navigator.clipboard.writeText(url);
+                toast.success("Copied live customer tracking link");
+              } catch (cause) {
+                toast.error(errorMessage(cause));
+              }
+            }}
+          >
+            <Share2 size={13} />
+            Share live tracking
+          </button>
           {data.version && !["finance", "customer"].includes(user?.role || "") && (
             <Link className={secondaryClass} href={`/shipments/new?edit=${id}`}>Edit job</Link>
           )}
@@ -127,6 +146,8 @@ export function JobDetail({ id }: { id: string }) {
       </nav>
       {tab === "Overview" && (
         <>
+          <LiveFieldTransportBanner jobId={id} onOpenAssignments={() => setTab("Assignments")} />
+          <IcegateCustomsPanel jobId={id} job={data} />
           {f.consolidation_reference && (
             <Consolidation id={id} reference={f.consolidation_reference} />
           )}
@@ -261,7 +282,7 @@ export function JobDetail({ id }: { id: string }) {
           <Financials id={id} finance={!!data.can_view_finance} />
         </>
       )}
-      {tab === "Documents" && <Documents id={id} />}{" "}
+      {tab === "Documents" && <Documents id={id} job={data} />}{" "}
       {tab === "Audit" && data.can_view_finance && <AuditPanel id={id} />}
       {tab === "Milestones" && <Milestones id={id} />}{" "}
       {tab === "Emails" && <Emails id={id} job={data} />}{" "}
@@ -619,15 +640,44 @@ function Financials({ id, finance }: { id: string; finance: boolean }) {
     </div>
   );
 }
-function Documents({ id }: { id: string }) {
-  const list = useList(id, "documents"),
+const DOCUMENT_TYPES = [
+  "hawb",
+  "mawb",
+  "hbl",
+  "mbl",
+  "invoice",
+  "debit_note",
+  "credit_note",
+  "packing_list",
+  "arrival_notice",
+  "delivery_order",
+  "commercial_invoice",
+  "pickup_receipt",
+  "warehouse_receipt",
+  "shipping_bill",
+  "proof_of_delivery",
+];
+function Documents({ id, job: data }: { id: string; job: Job }) {
+  const client = useQueryClient(),
+    list = useList(id, "documents"),
     action = useAction(),
     frame = useRef<HTMLIFrameElement>(null);
   const [type, setType] = useState("invoice"),
+    [filterType, setFilterType] = useState(""),
     [selected, setSelected] = useState<Row | null>(null),
     [html, setHtml] = useState(""),
     [copy, setCopy] = useState(1),
     [edits, setEdits] = useState<Row>({});
+  const docs = list.data?.items || [];
+  const filterOptions = Array.from(
+    new Set([
+      ...DOCUMENT_TYPES,
+      ...docs.map((doc: Row) => String(doc.document_type || "")).filter(Boolean),
+    ]),
+  );
+  const filteredDocs = docs.filter(
+    (doc: Row) => !filterType || doc.document_type === filterType,
+  );
   const preview = async (doc: Row, designation = copy) => {
     await action.run(async () => {
       if (!doc.content || Object.keys(doc.content).length === 0) {
@@ -673,30 +723,15 @@ function Documents({ id }: { id: string }) {
       <Panel
         title="Documents"
         action={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-[#858693]">Generate</span>
             <select
               aria-label="Document type"
               className={inputClass}
               value={type}
               onChange={(e) => setType(e.target.value)}
             >
-              {[
-                "hawb",
-                "mawb",
-                "hbl",
-                "mbl",
-                "invoice",
-                "debit_note",
-                "credit_note",
-                "packing_list",
-                "arrival_notice",
-                "delivery_order",
-                "commercial_invoice",
-                "pickup_receipt",
-                "warehouse_receipt",
-                "shipping_bill",
-                "proof_of_delivery",
-              ].map((t) => (
+              {DOCUMENT_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t.replaceAll("_", " ").toUpperCase()}
                 </option>
@@ -716,9 +751,33 @@ function Documents({ id }: { id: string }) {
           </div>
         }
       >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor={`job-doc-filter-${id}`} className="text-xs font-medium text-[#777884]">
+              Filter type
+            </label>
+            <select
+              id={`job-doc-filter-${id}`}
+              aria-label="Filter documents by type"
+              className={inputClass}
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+            >
+              <option value="">All types</option>
+              {filterOptions.map((t) => (
+                <option key={t} value={t}>
+                  {t.replaceAll("_", " ").toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="text-xs text-[#858693]">
+            Showing {filteredDocs.length} of {docs.length} {docs.length === 1 ? "document" : "documents"}
+          </span>
+        </div>
         <ErrorBanner error={list.error || action.error} />
         <div className="divide-y">
-          {list.data?.items.map((doc: Row) => (
+          {filteredDocs.map((doc: Row) => (
             <div
               key={doc.id}
               className="flex flex-wrap items-center justify-between gap-3 py-4"
@@ -743,6 +802,15 @@ function Documents({ id }: { id: string }) {
                   <Download size={13} />
                   PDF
                 </button>
+                <OutlookDraftButton
+                  jobId={id}
+                  documentId={doc.id}
+                  markDocumentSent={doc.status === "issued"}
+                  variant="secondary"
+                  label="Outlook Draft + PDF"
+                  body={`Dear ${data.customer_name || "Customer"},\n\nPlease find attached ${doc.document_type.replaceAll("_", " ").toUpperCase()} (${doc.document_number || data.ref_number}) for shipment ${data.ref_number} (${data.origin} → ${data.destination}).\n\nKind regards`}
+                  onCreated={() => void client.invalidateQueries({ queryKey: ["freight"] })}
+                />
                 {doc.status === "draft" && (
                   <button
                     className={buttonClass}
@@ -776,6 +844,13 @@ function Documents({ id }: { id: string }) {
               </div>
             </div>
           ))}
+          {!list.isLoading && filteredDocs.length === 0 && (
+            <p className="py-5 text-xs text-[#858693]">
+              {docs.length === 0
+                ? "No documents generated for this job yet."
+                : "No documents match the selected type."}
+            </p>
+          )}
         </div>
       </Panel>
       {selected && (
@@ -1115,8 +1190,203 @@ function MilestoneRecorded({ item }: { item: Row }) {
     {!!alerts?.missing_email?.length && <p className="text-amber-700">Add an email address for: {alerts.missing_email.join(", ")}</p>}
   </div>;
 }
+function LiveFieldTransportBanner({
+  jobId,
+  onOpenAssignments,
+}: {
+  jobId: string;
+  onOpenAssignments: () => void;
+}) {
+  const user = useAuthStore((s) => s.user);
+  const tasks = useQuery<NetworkList<NetworkTask>>({
+    queryKey: ["partner-network", user?.tenant_id, user?.id, "tasks", jobId],
+    queryFn: () => partnerNetwork.tasks(jobId),
+    enabled: !!user,
+    refetchInterval: 15_000,
+  });
+  const active = (tasks.data?.items || []).filter(
+    (t: NetworkTask) => !["cancelled", "rejected"].includes(t.status),
+  );
+  if (!active.length) return null;
+
+  return (
+    <Panel
+      title="Live driver & transport agent telemetry"
+      action={
+        <button type="button" className={secondaryClass} onClick={onOpenAssignments}>
+          <Navigation size={13} />
+          Open live map &amp; proofs
+        </button>
+      }
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        {active.map((task: any) => {
+          const loc = task.last_location;
+          const stale =
+            !loc?.captured_at ||
+            Date.now() - new Date(loc.captured_at).getTime() > 180_000;
+          const milestone =
+            task.completion?.latest_milestone ||
+            task.progress_event?.payload?.milestone ||
+            task.status;
+          const eta = task.completion?.driver_eta || task.driver_eta;
+          const locLabel =
+            loc?.location_note ||
+            (loc?.area?.name ? `Near ${loc.area.name}` : null);
+          return (
+            <div
+              key={task.id}
+              className="rounded-xl border border-[#e3e0f3] bg-[#faf9fe] p-3.5 text-xs"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-sm text-[#171725]">
+                  {taskLabels[task.kind as keyof typeof taskLabels] || task.kind} ·{" "}
+                  <span className="capitalize text-[#7068cf]">
+                    {String(milestone).replaceAll("_", " ")}
+                  </span>
+                </strong>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                    loc && !stale
+                      ? "bg-emerald-100 text-emerald-800"
+                      : loc
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      loc && !stale ? "bg-emerald-500" : loc ? "bg-amber-500" : "bg-slate-400"
+                    }`}
+                  />
+                  {loc && !stale ? "GPS Live" : loc ? "GPS Delayed" : task.tracking_status?.replaceAll("_", " ") || "Assigned"}
+                </span>
+              </div>
+              {task.driver && (
+                <p className="mt-1.5 font-medium text-[#3d3e4e]">
+                  Driver: {task.driver.name} · {task.driver.phone}
+                  {task.driver.vehicle ? ` · Vehicle ${task.driver.vehicle}` : ""}
+                </p>
+              )}
+              {loc ? (
+                <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[#5c5d6e]">
+                  <MapPin size={12} className="text-[#7068cf]" />
+                  <span>
+                    {locLabel || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`}
+                  </span>
+                  <span>· ±{Math.round(Number(loc.accuracy || 0))}m</span>
+                  {typeof loc.speed_kmh === "number" && <span>· {loc.speed_kmh} km/h</span>}
+                  <span>· {dateLabel(loc.captured_at)}</span>
+                  <a
+                    href={`https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 font-semibold text-[#7068cf] underline"
+                  >
+                    Map <ExternalLink size={11} />
+                  </a>
+                </p>
+              ) : (
+                <p className="mt-1 text-[#858693]">
+                  Scheduled {dateLabel(task.scheduled_at)} · Waiting for first driver GPS ping
+                </p>
+              )}
+              {(eta || task.completion?.container_number) && (
+                <p className="mt-1 text-[11px] font-medium text-indigo-900">
+                  {eta ? `Driver ETA: ${dateLabel(eta)}` : ""}
+                  {eta && task.completion?.container_number ? " · " : ""}
+                  {task.completion?.container_number
+                    ? `Container: ${task.completion.container_number}${task.completion.seal_number ? ` / Seal ${task.completion.seal_number}` : ""}`
+                    : ""}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function IcegateCustomsPanel({ jobId, job }: { jobId: string; job: Row }) {
+  const client = useQueryClient();
+  const [sbNum, setSbNum] = useState<string>(job.icegate_shipping_bill_number || "");
+  const [portCode, setPortCode] = useState("INNSA1");
+  const [manualStatus, setManualStatus] = useState<string>(job.icegate_status || "SB_FILED");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Panel title="Customs & ICEGATE shipping bill compliance">
+      <div className="grid items-end gap-3 sm:grid-cols-4">
+        <Field label="Shipping bill / BoE number">
+          <input
+            className={inputClass}
+            placeholder="e.g. SB-9928174"
+            value={sbNum}
+            onChange={(e) => setSbNum(e.target.value)}
+          />
+        </Field>
+        <Field label="Customs port code">
+          <input
+            className={inputClass}
+            placeholder="INNSA1 / INDEL4"
+            value={portCode}
+            onChange={(e) => setPortCode(e.target.value)}
+          />
+        </Field>
+        <Field label="Clearance stage">
+          <select
+            className={inputClass}
+            value={manualStatus}
+            onChange={(e) => setManualStatus(e.target.value)}
+          >
+            <option value="SB_FILED">Shipping Bill Filed</option>
+            <option value="UNDER_EXAMINATION">Under Customs Assessment / Exam</option>
+            <option value="LEO_GRANTED">Let Export Order (LEO) Granted</option>
+            <option value="OOC_CLEARED">Out of Charge (Import Cleared)</option>
+          </select>
+        </Field>
+        <button
+          type="button"
+          disabled={busy || sbNum.trim().length < 3}
+          className={secondaryClass}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const res = await freight.post<{ icegate_status: string }>(
+                `/jobs/${jobId}/icegate-sync`,
+                {
+                  shipping_bill_number: sbNum,
+                  port_code: portCode,
+                  manual_status: manualStatus,
+                },
+              );
+              toast.success(`Customs status updated: ${res.icegate_status}`);
+              await client.invalidateQueries({ queryKey: ["freight"] });
+            } catch (cause) {
+              toast.error(errorMessage(cause));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <ShieldCheck size={14} />
+          {busy ? "Syncing…" : "Sync ICEGATE / Customs"}
+        </button>
+      </div>
+      {job.icegate_status && (
+        <p className="mt-2.5 text-xs text-[#606174]">
+          Recorded status: <strong className="text-[#171725]">{job.icegate_status}</strong>
+          {job.icegate_last_checked ? ` · Last checked ${dateLabel(job.icegate_last_checked)}` : ""}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 function Emails({ id, job }: { id: string; job: Job }) {
   const [page, setPage] = useState(1),
+    [replyTargetId, setReplyTargetId] = useState(""),
     list = useList(id, "emails", page),
     milestones = useList(id, "milestones"),
     action = useAction(),
@@ -1190,6 +1460,24 @@ function Emails({ id, job }: { id: string; job: Job }) {
         limit={100}
         onChange={setPage}
       />
+      {!!list.data?.items?.length && (
+        <div className="mb-3">
+          <Field label="Reply to thread message">
+            <select
+              className={inputClass}
+              value={replyTargetId}
+              onChange={(e) => setReplyTargetId(e.target.value)}
+            >
+              <option value="">Latest message linked to {job.ref_number}</option>
+              {list.data.items.map((m: Row) => (
+                <option key={m.id} value={m.id}>
+                  {m.subject || "(No subject)"} · {m.from} · {dateLabel(m.received_at)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
       <Field label="Draft reply">
         <textarea
           className={inputClass}
@@ -1198,7 +1486,7 @@ function Emails({ id, job }: { id: string; job: Job }) {
           onChange={(e) => draft.setValue(e.target.value)}
         />
       </Field>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           className={secondaryClass}
           onClick={async () => {
@@ -1213,11 +1501,12 @@ function Emails({ id, job }: { id: string; job: Job }) {
           <Copy size={13} />
           Copy
         </button>
-        <span title="Email write endpoint is not connected">
-          <button disabled className={buttonClass}>
-            Send
-          </button>
-        </span>
+        <OutlookDraftButton
+          jobId={id}
+          messageId={replyTargetId || undefined}
+          body={draft.value}
+          label="Create Outlook draft (same thread)"
+        />
       </div>
     </Panel>
   );

@@ -1,0 +1,51 @@
+{
+  "name": "freight-partner-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:web": "node scripts/build-web.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~57.0.16",
+    "@react-native-community/netinfo": "12.0.1",
+    "@react-native-firebase/app": "^26.4.0",
+    "@react-native-firebase/messaging": "^26.4.0",
+    "@supabase/supabase-js": "^2.117.3",
+    "expo": "~57.0.27",
+    "expo-auth-session": "~57.0.14",
+    "expo-build-properties": "~57.0.22",
+    "expo-crypto": "~57.0.3",
+    "expo-dev-client": "~57.0.19",
+    "expo-document-picker": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-image-picker": "~57.0.20",
+    "expo-linking": "~57.0.12",
+    "expo-location": "~57.0.20",
+    "expo-secure-store": "~57.0.4",
+    "expo-sqlite": "~57.0.4",
+    "expo-task-manager": "~57.0.21",
+    "expo-web-browser": "~57.0.3",
+    "react": "19.2.3",
+    "react-dom": "^19.2.3",
+    "react-native": "0.86.3",
+    "react-native-url-polyfill": "^4.0.0",
+    "react-native-web": "^0.21.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "fake-indexeddb": "^6.2.6",
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6",
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
+  }
+}

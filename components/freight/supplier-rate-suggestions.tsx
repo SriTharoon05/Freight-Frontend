@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { dateLabel, moneyLabel } from "@/lib/freight";
+import { dateLabel, formatRateUnitLabel, moneyLabel } from "@/lib/freight";
 import { secondaryClass } from "./shared";
 
 export type EmailRate = Record<string, any>;
@@ -59,7 +59,21 @@ export function RateCardSuggestions({ data, loading, onApply, canApply, children
           <article key={rate.id} className="rounded-lg border border-[#e5e3ef] bg-white p-3 text-xs">
             <strong>{rate.carrier_name || "Carrier rate card"}</strong>
             <p className="mt-1">{rate.origin_country_code} → {rate.dest_country_code} · {rate.transport_mode === "sea" ? "Ocean" : rate.transport_mode}</p>
-            {rate.base_rate_paise !== undefined && <p className="mt-1">Base {moneyLabel(Number(rate.base_rate_paise) / 100, rate.currency_code)} · Per kg {moneyLabel(Number(rate.per_kg_rate_paise) / 100, rate.currency_code)} · Per cbm {moneyLabel(Number(rate.per_cbm_rate_paise) / 100, rate.currency_code)}</p>}
+            {rate.base_rate_paise !== undefined && (
+              <p className="mt-1">
+                {rate.rate_unit && rate.unit_rate_paise !== undefined ? (
+                  <>
+                    Rate <strong>{moneyLabel(Number(rate.unit_rate_paise) / 100, rate.currency_code)} {formatRateUnitLabel(rate.rate_unit)}</strong>
+                    {Number(rate.base_rate_paise) > 0 && !["per_shipment", "per_container"].includes(rate.rate_unit)
+                      ? ` · Base/Min ${moneyLabel(Number(rate.base_rate_paise) / 100, rate.currency_code)}`
+                      : ""}
+                  </>
+                ) : (
+                  <>Base {moneyLabel(Number(rate.base_rate_paise) / 100, rate.currency_code)} · Per kg {moneyLabel(Number(rate.per_kg_rate_paise) / 100, rate.currency_code)} · Per cbm {moneyLabel(Number(rate.per_cbm_rate_paise) / 100, rate.currency_code)}</>
+                )}
+                {Number(rate.markup_percent || 0) > 0 ? ` · Card markup ${rate.markup_percent}%` : ""}
+              </p>
+            )}
             <p className="mt-1 text-[#777884]">{rate.valid_until ? `Valid until ${dateLabel(rate.valid_until)}` : "No stated expiry"}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Link href="/rates" className={secondaryClass}>View rate cards</Link>

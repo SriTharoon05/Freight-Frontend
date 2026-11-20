@@ -14,6 +14,8 @@
 
 # production
 /build
+/public/demo/
+/demo-sites/freight-session/dist/
 
 # misc
 .DS_Store
@@ -34,3 +36,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+# local archives and logs
+*.zip
+*.log
+partner-mobile/node_modules/
+partner-mobile/.env
+partner-mobile/.expo/
+/demo-sites/

@@ -662,19 +662,39 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function EditableField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const isAddress = label.toLowerCase().includes("address");
   return (
     <div>
       <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[#a0a0ac]">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} w-full`} />
+      {isAddress ? (
+        <textarea
+          rows={3}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputCls} w-full resize-y min-h-[72px]`}
+        />
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} w-full`} />
+      )}
     </div>
   );
 }
 
 function FormField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const isAddress = label.toLowerCase().includes("address");
   return (
     <div>
       <label className="mb-1.5 block text-[12px] font-semibold text-[#393945]">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} w-full`} />
+      {isAddress ? (
+        <textarea
+          rows={3}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputCls} w-full resize-y min-h-[72px]`}
+        />
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} w-full`} />
+      )}
     </div>
   );
 }

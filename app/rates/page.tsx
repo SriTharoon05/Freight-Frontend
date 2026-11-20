@@ -3,19 +3,48 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { ratesApi, vendorQuotesApi } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { AppShell } from '@/components/shell/app-shell';
 import { Card, SectionTitle } from '@/components/shell/card';
 import { TableSkeleton, EmptyState, ErrorState } from '@/components/shell/states';
 import { Modal } from '@/components/shell/modal';
-import { formatINR } from '@/lib/format';
 import { formatISTDate } from '@/lib/date';
+import { formatRateUnitLabel, moneyLabel } from '@/lib/freight';
 import { useAuthStore } from '@/lib/auth-store';
 import { toApiError } from '@/lib/api-client';
-import type { RateCard } from '@/lib/types';
+import type { RateCard, RateUnit } from '@/lib/types';
 import { EmailRateCards } from '@/components/freight/email-rate-cards';
+
+const RATE_UNIT_OPTIONS: { value: RateUnit; label: string }[] = [
+  { value: 'per_kg', label: 'Per kg (Chargeable Weight)' },
+  { value: 'per_lb', label: 'Per lb (Imperial Weight)' },
+  { value: 'per_m3', label: 'Per m³ / CBM (Volume)' },
+  { value: 'per_shipment', label: 'Per shipment (Flat)' },
+  { value: 'per_container', label: 'Per container (FCL)' },
+];
+
+const CURRENCY_OPTIONS = ['USD', 'INR', 'EUR', 'GBP', 'AED', 'SGD'];
+
+function resolveRateDisplay(r: RateCard) {
+  const currency = r.currency_code || 'INR';
+  const unit = r.rate_unit || (r.per_kg_rate_paise ? 'per_kg' : r.per_cbm_rate_paise ? 'per_m3' : 'per_shipment');
+  const unitPaise =
+    r.unit_rate_paise !== undefined && r.unit_rate_paise !== null
+      ? r.unit_rate_paise
+      : unit === 'per_kg'
+        ? Number(r.per_kg_rate_paise || 0)
+        : unit === 'per_lb'
+          ? Number(r.per_lb_rate_paise || 0)
+          : unit === 'per_m3' || unit === 'per_cbm'
+            ? Number(r.per_cbm_rate_paise || 0)
+            : Number(r.base_rate_paise || 0);
+  const main = `${moneyLabel(unitPaise / 100, currency)} ${formatRateUnitLabel(unit)}`;
+  const hasSeparateBase =
+    !['per_shipment', 'per_container'].includes(unit) && Number(r.base_rate_paise || 0) > 0;
+  return { main, base: hasSeparateBase ? `Base ${moneyLabel(r.base_rate_paise / 100, currency)}` : '' };
+}
 
 export default function RatesPage() {
   const queryClient = useQueryClient();
@@ -29,6 +58,12 @@ export default function RatesPage() {
     queryKey: queryKeys.rateCards({ mode: modeFilter, active: showInactive ? undefined : true }),
     queryFn: () => ratesApi.list({ mode: modeFilter || undefined, active: showInactive ? undefined : true }),
   });
+  const filteredRates = (rates || []).filter((r: RateCard & { transport_mode?: string; is_active?: boolean }) => {
+    const m = (r.mode || r.transport_mode || '').toLowerCase();
+    if (modeFilter && (modeFilter === 'ocean' ? !['ocean', 'sea'].includes(m) : m !== modeFilter)) return false;
+    if (!showInactive && r.is_active === false && r.active === false) return false;
+    return true;
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => ratesApi.delete(id),
@@ -39,7 +74,7 @@ export default function RatesPage() {
     onError: () => toast.error('Failed to delete rate card'),
   });
 
-  const canEdit = hasRole('ops_manager', 'org_admin');
+  const canEdit = hasRole('ops_manager', 'org_admin', 'admin');
 
   return (
     <AppShell>
@@ -67,6 +102,7 @@ export default function RatesPage() {
             <option value="air">Air</option>
             <option value="road">Road</option>
             <option value="rail">Rail</option>
+            <option value="multimodal">Multimodal</option>
           </select>
           <label className="flex items-center gap-2 text-[12px] font-medium text-[#777884]">
             <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded" />
@@ -80,15 +116,15 @@ export default function RatesPage() {
           <TableSkeleton rows={6} cols={6} />
         ) : isError ? (
           <ErrorState message="Could not load rate cards" onRetry={() => refetch()} />
-        ) : rates && rates.length > 0 ? (
+        ) : filteredRates.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-left">
+            <table className="w-full min-w-[700px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-[#f0f0f4] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#a2a2ad]">
                   <th className="pb-3">Carrier</th>
                   <th className="pb-3">Route</th>
                   <th className="pb-3">Mode</th>
-                  <th className="pb-3">Base rate</th>
+                  <th className="pb-3">Rate / Unit</th>
                   <th className="pb-3">Markup</th>
                   <th className="pb-3">Validity</th>
                   <th className="pb-3">Lane Volatile</th>
@@ -96,12 +132,24 @@ export default function RatesPage() {
                 </tr>
               </thead>
               <tbody>
-                {rates.map((r: RateCard) => (
+                {filteredRates.map((r: RateCard) => {
+                  const rateDisplay = resolveRateDisplay(r);
+                  return (
                   <tr key={r.id} className="border-b border-[#f4f4f7] last:border-0">
                     <td className="py-3 text-[12px] font-semibold text-[#393945]">{r.carrier_name || '—'}</td>
-                    <td className="py-3 text-[11px] text-[#777884]">{r.origin} → {r.destination}</td>
-                    <td className="py-3 text-[11px] capitalize text-[#777884]">{r.mode}</td>
-                    <td className="py-3 text-[12px] font-semibold text-[#393945]">{formatINR(r.base_rate_paise)}</td>
+                    <td className="py-3 text-[11px] text-[#777884]">
+                      {r.origin} → {r.destination}
+                      {r.origin_country_code && r.dest_country_code && (r.origin !== r.origin_country_code || r.destination !== r.dest_country_code) ? (
+                        <span className="ml-1.5 rounded bg-[#f4f4f7] px-1.5 py-0.5 text-[10px] font-mono text-[#686975]">
+                          {r.origin_country_code}→{r.dest_country_code}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-3 text-[11px] capitalize text-[#777884]">{r.mode === 'sea' as any ? 'ocean' : r.mode}</td>
+                    <td className="py-3 text-[12px] font-semibold text-[#393945]">
+                      <div>{rateDisplay.main}</div>
+                      {rateDisplay.base && <div className="text-[10px] font-normal text-[#777884]">{rateDisplay.base}</div>}
+                    </td>
                     <td className="py-3 text-[11px] text-[#777884]">{r.markup_percent}%</td>
                     <td className="py-3 text-[11px] text-[#9899a5]">
                       {formatISTDate(r.valid_from)}
@@ -119,11 +167,12 @@ export default function RatesPage() {
                     {canEdit && (
                       <td className="py-3">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => setEditing(r)} className="rounded-lg border border-[#e9e9ef] p-1.5 text-[#777884] hover:bg-[#f7f7fa]">
+                          <button onClick={() => setEditing(r)} aria-label="Edit rate card" className="rounded-lg border border-[#e9e9ef] p-1.5 text-[#777884] hover:bg-[#f7f7fa]">
                             <Pencil size={13} />
                           </button>
                           <button
                             onClick={() => { if (confirm('Delete this rate card?')) deleteMutation.mutate(r.id); }}
+                            aria-label="Delete rate card"
                             className="rounded-lg border border-[#e9e9ef] p-1.5 text-[#d45166] hover:bg-[#fff0f2]"
                           >
                             <Trash2 size={13} />
@@ -132,7 +181,8 @@ export default function RatesPage() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -157,27 +207,68 @@ export default function RatesPage() {
 }
 
 function RateCardModal({ rateCard, onClose, onSaved }: { rateCard: RateCard | null; onClose: () => void; onSaved: () => void }) {
+  const initialUnit: RateUnit =
+    rateCard?.rate_unit ||
+    (rateCard?.per_kg_rate_paise
+      ? 'per_kg'
+      : rateCard?.per_cbm_rate_paise
+        ? 'per_m3'
+        : 'per_shipment');
+  const initialUnitRate =
+    rateCard?.unit_rate_paise !== undefined && rateCard?.unit_rate_paise !== null
+      ? String(rateCard.unit_rate_paise / 100)
+      : initialUnit === 'per_kg' && rateCard?.per_kg_rate_paise
+        ? String(rateCard.per_kg_rate_paise / 100)
+        : initialUnit === 'per_m3' && rateCard?.per_cbm_rate_paise
+          ? String(rateCard.per_cbm_rate_paise / 100)
+          : rateCard?.base_rate_paise
+            ? String(rateCard.base_rate_paise / 100)
+            : '';
+
   const [form, setForm] = useState({
     carrier_name: rateCard?.carrier_name || '',
-    origin: rateCard?.origin || '',
-    destination: rateCard?.destination || '',
-    mode: rateCard?.mode || 'ocean',
-    base_rate_paise: rateCard?.base_rate_paise ? String(rateCard.base_rate_paise / 100) : '',
-    markup_percent: rateCard?.markup_percent ? String(rateCard.markup_percent) : '',
+    origin: rateCard?.origin || rateCard?.origin_country_code || '',
+    destination: rateCard?.destination || rateCard?.dest_country_code || '',
+    mode: (rateCard?.mode === ('sea' as any) ? 'ocean' : rateCard?.mode) || 'ocean',
+    currency_code: rateCard?.currency_code || 'USD',
+    rate_unit: initialUnit,
+    unit_rate: initialUnitRate,
+    base_rate:
+      !['per_shipment', 'per_container'].includes(initialUnit) && rateCard?.base_rate_paise
+        ? String(rateCard.base_rate_paise / 100)
+        : '0',
+    markup_percent: rateCard?.markup_percent ? String(rateCard.markup_percent) : '15',
     valid_from: rateCard?.valid_from ? rateCard.valid_from.split('T')[0] : new Date().toISOString().split('T')[0],
     valid_until: rateCard?.valid_until ? rateCard.valid_until.split('T')[0] : '',
   });
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
+    if (!form.origin.trim() || !form.destination.trim()) {
+      toast.error('Origin and destination are required');
+      return;
+    }
+    const unitAmount = parseFloat(form.unit_rate);
+    if (Number.isNaN(unitAmount) || unitAmount < 0) {
+      toast.error('Enter a valid rate amount');
+      return;
+    }
+    const baseAmount = parseFloat(form.base_rate) || 0;
     setSaving(true);
     try {
+      const unitPaise = Math.round(unitAmount * 100);
+      const basePaise = ['per_shipment', 'per_container'].includes(form.rate_unit)
+        ? unitPaise
+        : Math.round(baseAmount * 100);
       const body = {
         carrier_name: form.carrier_name,
-        origin: form.origin,
-        destination: form.destination,
+        origin: form.origin.trim(),
+        destination: form.destination.trim(),
         mode: form.mode,
-        base_rate_paise: Math.round(parseFloat(form.base_rate_paise) * 100),
+        currency_code: form.currency_code,
+        rate_unit: form.rate_unit,
+        unit_rate_paise: unitPaise,
+        base_rate_paise: basePaise,
         markup_percent: parseFloat(form.markup_percent) || 0,
         valid_from: form.valid_from,
         valid_until: form.valid_until || null,
@@ -220,15 +311,15 @@ function RateCardModal({ rateCard, onClose, onSaved }: { rateCard: RateCard | nu
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Carrier name</label>
-          <input value={form.carrier_name} onChange={(e) => setForm({ ...form, carrier_name: e.target.value })} className={inputCls} />
+          <input value={form.carrier_name} onChange={(e) => setForm({ ...form, carrier_name: e.target.value })} placeholder="e.g. Emirates SkyCargo, Maersk" className={inputCls} />
         </div>
         <div>
-          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Origin</label>
-          <input value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value })} className={inputCls} />
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Origin (Country code or Port, CC)</label>
+          <input value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value })} placeholder="e.g. IN or Nhava Sheva, IN" className={inputCls} />
         </div>
         <div>
-          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Destination</label>
-          <input value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })} className={inputCls} />
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Destination (Country code or Port, CC)</label>
+          <input value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })} placeholder="e.g. AE or Dubai, AE" className={inputCls} />
         </div>
         <div>
           <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Mode</label>
@@ -237,15 +328,48 @@ function RateCardModal({ rateCard, onClose, onSaved }: { rateCard: RateCard | nu
             <option value="air">Air</option>
             <option value="road">Road</option>
             <option value="rail">Rail</option>
+            <option value="multimodal">Multimodal</option>
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Markup %</label>
-          <input type="number" value={form.markup_percent} onChange={(e) => setForm({ ...form, markup_percent: e.target.value })} className={inputCls} />
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Currency</label>
+          <select value={form.currency_code} onChange={(e) => setForm({ ...form, currency_code: e.target.value })} className={inputCls}>
+            {CURRENCY_OPTIONS.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
         </div>
-        <div className="sm:col-span-2">
-          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Base rate (₹)</label>
-          <input type="number" value={form.base_rate_paise} onChange={(e) => setForm({ ...form, base_rate_paise: e.target.value })} className={inputCls} />
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Rate Unit</label>
+          <select aria-label="Rate Unit" value={form.rate_unit} onChange={(e) => setForm({ ...form, rate_unit: e.target.value as RateUnit })} className={inputCls}>
+            {RATE_UNIT_OPTIONS.map((u) => (
+              <option key={u.value} value={u.value}>{u.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">
+            Rate Amount ({form.currency_code} {formatRateUnitLabel(form.rate_unit)})
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={form.unit_rate}
+            onChange={(e) => setForm({ ...form, unit_rate: e.target.value })}
+            placeholder="0.00"
+            className={inputCls}
+          />
+        </div>
+        {!['per_shipment', 'per_container'].includes(form.rate_unit) && (
+          <div>
+            <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Base / Minimum Fee ({form.currency_code})</label>
+            <input type="number" min="0" step="any" value={form.base_rate} onChange={(e) => setForm({ ...form, base_rate: e.target.value })} className={inputCls} />
+          </div>
+        )}
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Default Markup %</label>
+          <input type="number" min="0" step="any" value={form.markup_percent} onChange={(e) => setForm({ ...form, markup_percent: e.target.value })} className={inputCls} />
         </div>
         <div>
           <label className="mb-1 block text-[12px] font-semibold text-[#393945]">Valid from</label>

@@ -1,0 +1,36 @@
+Deploy the updated backend first. Its startup migration adds conversation state
+and safely rechecks existing imported emails. Then rebuild this frontend on the
+existing Netlify project with its existing four public build variables.
+
+Render backend environment:
+  MAILBOX_POLLING_MODE=api
+  MAILBOX_POLL_INTERVAL_SECONDS=60
+  MAILBOX_SYNC_SECRET=<a new random secret of at least 32 characters>
+  RUN_MIGRATIONS_ON_START=true
+
+Netlify production Functions environment (server-only):
+  MAILBOX_SYNC_URL=https://freight-backend-fibk.onrender.com/api/v1/integrations/outlook/scheduled-sync
+  MAILBOX_SYNC_SECRET=<exactly the same new random secret as Render>
+
+Keep MAILBOX_SYNC_SECRET private. Never use a NEXT_PUBLIC_ prefix for it or reuse
+a login password. Add these settings in each provider's dashboard; this ZIP
+contains no actual credentials. Rebuild after adding the Netlify settings.
+
+In Netlify Functions, confirm mailbox-sync is Scheduled and use Run now once.
+The published site triggers inbox checks every five minutes. The API also polls
+while running and on startup. Cold starts and free-plan quotas can delay checks;
+continuous production service still needs always-running compute.
+
+RFQs > Email RFQ requests now shows detected conversations automatically.
+Read emails are included. A company reply closes the pending state; a new
+customer follow-up reopens it. View conversation shows received and sent mail.
+Prepare RFQ reviews the customer, route and cargo before preparing a quote.
+
+If the monitored mailbox is copied on every relevant company reply, those received
+copies are enough to detect replies. For other replies, connect the replying
+mailbox or enable shared-mailbox sent-copy saving in Microsoft 365. A reply that
+is neither received nor saved in a connected mailbox cannot be detected.
+Both Inbox and Sent Items must finish their
+initial import before unanswered status is final.
+
+The full backend guide is AUTOMATIC_INBOX_DEPLOYMENT.md.

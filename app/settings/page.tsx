@@ -24,6 +24,7 @@ type Row = Record<string, any>;
 const groups: Record<string, string[]> = {
   "Company Profile": [
     "name",
+    "contact_person",
     "address",
     "city",
     "email",
@@ -36,7 +37,17 @@ const groups: Record<string, string[]> = {
     "default_payment_terms",
     "signature",
   ],
-  "Quotation Defaults": ["quotation_terms_and_conditions"],
+  "Quotation Defaults": [
+    "default_profit_margin_percent",
+    "default_pricing_method",
+    "default_documentation_fee",
+    "default_documentation_currency",
+    "default_quote_currency",
+    "default_quote_tax_percent",
+    "default_quote_validity_days",
+    "default_air_divisor",
+    "quotation_terms_and_conditions",
+  ],
   "Outlook Integration": ["outlook_read_url", "polling_seconds"],
   Notifications: [
     "escalation_minutes",
@@ -127,8 +138,120 @@ export default function SettingsPage() {
                 run(() => freight.put("/settings", form));
               }}
             >
-              {groups[tab].map((key) => (
-                <Field label={key.replaceAll("_", " ")} key={key}>
+              {groups[tab].map((key) => {
+                const labelMap: Record<string, string> = {
+                  contact_person: "Default quote contact / prepared by",
+                  logo_url: "Company logo (rendered on Quotations, HBL & HAWB)",
+                  iata_code: "IATA cargo agent code (optional)",
+                  default_profit_margin_percent: "Default profit / markup (%)",
+                  default_pricing_method: "Default pricing method",
+                  default_documentation_fee: "Default documentation fee",
+                  default_documentation_currency: "Documentation fee currency",
+                  default_quote_currency: "Default quote currency",
+                  default_quote_tax_percent: "Default quote tax (%)",
+                  default_quote_validity_days: "Default quote validity (days)",
+                  default_air_divisor: "Default air volumetric divisor",
+                };
+                if (key === "logo_url") {
+                  return (
+                    <div key={key} className="md:col-span-2 rounded-xl border border-[#e5e3ee] bg-slate-50/70 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-900">
+                            {labelMap.logo_url}
+                          </div>
+                          <p className="text-[11px] text-slate-600">
+                            Upload a PNG, JPG, or WebP logo (recommended horizontal aspect ratio ~3.5:1, e.g. 380×104 px). Click <strong>Save settings</strong> after uploading.
+                          </p>
+                          <div className="pt-1.5 flex flex-wrap items-center gap-2">
+                            <label className={`${secondaryClass} cursor-pointer ${!admin ? "pointer-events-none opacity-50" : ""}`}>
+                              <span>Upload logo file</span>
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                disabled={!admin}
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = "";
+                                  if (!file) return;
+                                  if (file.size > 4 * 1024 * 1024) {
+                                    toast.error("Logo file must be under 4 MB");
+                                    return;
+                                  }
+                                  const reader = new FileReader();
+                                  reader.onload = () => {
+                                    const rawData = typeof reader.result === "string" ? reader.result : "";
+                                    if (!rawData) return;
+                                    const img = new window.Image();
+                                    img.onload = () => {
+                                      const maxW = 380;
+                                      const maxH = 104;
+                                      const scale = Math.min(1, maxW / (img.width || 1), maxH / (img.height || 1));
+                                      const targetW = Math.max(1, Math.round(img.width * scale));
+                                      const targetH = Math.max(1, Math.round(img.height * scale));
+                                      const canvas = document.createElement("canvas");
+                                      canvas.width = targetW;
+                                      canvas.height = targetH;
+                                      const ctx = canvas.getContext("2d");
+                                      if (ctx) {
+                                        ctx.clearRect(0, 0, targetW, targetH);
+                                        ctx.drawImage(img, 0, 0, targetW, targetH);
+                                        const optimized = canvas.toDataURL("image/png");
+                                        setForm((prev) => ({ ...prev, logo_url: optimized }));
+                                        toast.success("Logo loaded — click 'Save settings' to apply across quotations & documents");
+                                      } else {
+                                        setForm((prev) => ({ ...prev, logo_url: rawData }));
+                                      }
+                                    };
+                                    img.onerror = () => toast.error("Could not decode image file");
+                                    img.src = rawData;
+                                  };
+                                  reader.readAsDataURL(file);
+                                }}
+                              />
+                            </label>
+                            {form.logo_url && admin && (
+                              <button
+                                type="button"
+                                className={secondaryClass}
+                                onClick={() => setForm((prev) => ({ ...prev, logo_url: "" }))}
+                              >
+                                Remove logo
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Exact 190x52 Quotation Document Header Slot Preview */}
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                            Quotation Header Slot (190 × 52 px)
+                          </span>
+                          <div className="flex h-[56px] w-[198px] items-center justify-center rounded-md border border-dashed border-slate-300 bg-white p-1.5 shadow-sm">
+                            {form.logo_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={form.logo_url}
+                                alt="Company Logo Preview"
+                                className="max-h-[48px] max-w-[186px] object-contain"
+                              />
+                            ) : (
+                              <div className="text-center">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                  Company Logo
+                                </div>
+                                <div className="text-[9px] text-slate-400">No logo uploaded</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                <Field label={labelMap[key] || key.replaceAll("_", " ")} key={key}>
                   {[
                     "address",
                     "bank_details",
@@ -157,12 +280,57 @@ export default function SettingsPage() {
                       <option>PPD</option>
                       <option>COLL</option>
                     </select>
+                  ) : key === "default_pricing_method" ? (
+                    <select
+                      className={inputClass}
+                      disabled={!admin}
+                      value={form[key] || "margin"}
+                      onChange={(e) =>
+                        setForm({ ...form, [key]: e.target.value })
+                      }
+                    >
+                      <option value="margin">Gross Margin % (Sell = Cost / (1 − %))</option>
+                      <option value="markup">Cost Markup % (Sell = Cost × (1 + %))</option>
+                    </select>
+                  ) : key === "default_air_divisor" ? (
+                    <select
+                      className={inputClass}
+                      disabled={!admin}
+                      value={form[key] || "standard"}
+                      onChange={(e) =>
+                        setForm({ ...form, [key]: e.target.value })
+                      }
+                    >
+                      <option value="standard">Standard Air (6,000 cm³/kg · 166 in³/lb)</option>
+                      <option value="express">Express Courier (5,000 cm³/kg · 139 in³/lb)</option>
+                    </select>
+                  ) : key === "default_documentation_currency" || key === "default_quote_currency" ? (
+                    <select
+                      className={inputClass}
+                      disabled={!admin}
+                      value={form[key] || "USD"}
+                      onChange={(e) =>
+                        setForm({ ...form, [key]: e.target.value })
+                      }
+                    >
+                      {["USD", "INR", "EUR", "GBP", "AED", "SGD"].map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                   ) : (
                     <input
                       disabled={!admin}
                       className={inputClass}
+                      min={typeof form[key] === "number" ? "0" : undefined}
+                      step={typeof form[key] === "number" ? "any" : undefined}
                       type={
-                        typeof form[key] === "number"
+                        typeof form[key] === "number" ||
+                        [
+                          "default_profit_margin_percent",
+                          "default_documentation_fee",
+                          "default_quote_tax_percent",
+                          "default_quote_validity_days",
+                        ].includes(key)
                           ? "number"
                           : key === "email"
                             ? "email"
@@ -175,7 +343,13 @@ export default function SettingsPage() {
                         setForm({
                           ...form,
                           [key]:
-                            typeof form[key] === "number"
+                            typeof form[key] === "number" ||
+                            [
+                              "default_profit_margin_percent",
+                              "default_documentation_fee",
+                              "default_quote_tax_percent",
+                              "default_quote_validity_days",
+                            ].includes(key)
                               ? Number(e.target.value)
                               : e.target.value,
                         })
@@ -183,7 +357,8 @@ export default function SettingsPage() {
                     />
                   )}
                 </Field>
-              ))}
+                );
+              })}
               {admin && (
                 <div className="md:col-span-2">
                   <button className={buttonClass} disabled={busy}>

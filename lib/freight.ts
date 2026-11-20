@@ -2,6 +2,7 @@ import { api } from "./api-client";
 export function localDateInput(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
@@ -39,7 +40,7 @@ export interface DimensionItem {
   length: number;
   width: number;
   height: number;
-  unit: "cm" | "m";
+  unit: "cm" | "m" | "in";
   gross_weight: number;
   volume: number;
   volumetric_weight: number;
@@ -60,7 +61,7 @@ export interface Cargo {
   volumetric_weight?: number;
   dimension_items?: DimensionItem[];
 }
-export const blankDimensionItem = (unit: "cm" | "m" = "cm"): DimensionItem => ({
+export const blankDimensionItem = (unit: "cm" | "m" | "in" = "cm"): DimensionItem => ({
   pieces: 1,
   length: 0,
   width: 0,
@@ -73,6 +74,7 @@ export const blankDimensionItem = (unit: "cm" | "m" = "cm"): DimensionItem => ({
 export function calcDimensionItem(
   item: DimensionItem,
   mode: string = "air",
+  divisorType: "standard" | "express" = "standard",
 ): { volume: number; volumetric_weight: number } {
   const p = Math.max(1, Number(item.pieces) || 1);
   const l = Math.max(0, Number(item.length) || 0);
@@ -86,32 +88,42 @@ export function calcDimensionItem(
   let volumeM3 = 0;
   let volWeightKg = 0;
 
-  if (item.unit === "m") {
-    // Dimensions in meters: Volume (m³) = L * W * H * pieces
+  if (item.unit === "in") {
+    // Imperial (Inches and Pounds):
+    // Volume (m3) = (L * 0.0254) * (W * 0.0254) * (H * 0.0254) * pieces
+    volumeM3 = (l * 0.0254) * (w * 0.0254) * (h * 0.0254) * p;
+    // Standard Air Freight: (L * W * H * pieces) / 166
+    // Express Couriers (DHL, FedEx, UPS): (L * W * H * pieces) / 139
+    const imperialDivisor = divisorType === "express" ? 139 : 166;
+    const volWeightLbs = (l * w * h * p) / imperialDivisor;
+    // 1 lb = 0.45359237 kg
+    volWeightKg = volWeightLbs * 0.45359237;
+  } else if (item.unit === "m") {
+    // Dimensions in meters: Volume (m3) = L * W * H * pieces
     volumeM3 = l * w * h * p;
     if (mode === "air") {
-      // Air freight: (L*W*H in cm)/6000 => 1 m³ = 166.67 kg
-      volWeightKg = volumeM3 * (1000000 / 6000);
+      // Standard IATA: 6000 divisor (1 m3 = 166.67 kg)
+      // Express Courier: 5000 divisor (1 m3 = 200 kg)
+      const airDivisor = divisorType === "express" ? 5000 : 6000;
+      volWeightKg = volumeM3 * (1000000 / airDivisor);
     } else if (mode === "ocean") {
-      // Ocean freight: 1 m³ = 1,000 kg (1 metric ton)
       volWeightKg = volumeM3 * 1000;
     } else if (mode === "road") {
-      // Road freight: (L*W*H in cm)/3000 => 1 m³ = 333.33 kg
       volWeightKg = volumeM3 * (1000000 / 3000);
     } else {
       volWeightKg = volumeM3 * 1000;
     }
   } else {
-    // Dimensions in centimeters: Volume (m³) = (L * W * H * pieces) / 1,000,000
+    // Dimensions in centimeters: Volume (m3) = (L * W * H * pieces) / 1,000,000
     volumeM3 = (l * w * h * p) / 1000000;
     if (mode === "air") {
-      // Air freight: (L * W * H * pieces) / 6000
-      volWeightKg = (l * w * h * p) / 6000;
+      // Standard Air Freight divisor = 6,000 (1 m3 = 167 kg)
+      // Express Couriers (DHL, FedEx, UPS) divisor = 5,000
+      const airDivisor = divisorType === "express" ? 5000 : 6000;
+      volWeightKg = (l * w * h * p) / airDivisor;
     } else if (mode === "ocean") {
-      // Ocean freight: (L * W * H * pieces) / 1000 (1 CBM = 1,000 kg)
       volWeightKg = (l * w * h * p) / 1000;
     } else if (mode === "road") {
-      // Road freight: (L * W * H * pieces) / 3000
       volWeightKg = (l * w * h * p) / 3000;
     } else {
       volWeightKg = (l * w * h * p) / 1000;
@@ -158,20 +170,21 @@ export function parseDimensionsString(
 
   for (const part of parts) {
     const match = part.match(
-      /(?:(\d+)\s*[@x*]\s*)?(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)(?:\s*(cm|m))?/i,
+      /(?:(\d+)\s*[@x*]\s*)?(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)(?:\s*(cm|m|in))?/i,
     );
     if (match) {
       const p = match[1] ? Number(match[1]) : Math.max(1, pieces);
       const l = Number(match[2]);
       const w = Number(match[3]);
       const h = Number(match[4]);
-      const unit = (match[5] || "cm").toLowerCase() === "m" ? "m" : "cm";
+      const rawUnit = (match[5] || "cm").toLowerCase();
+      const unit: "cm" | "m" | "in" = rawUnit === "m" ? "m" : rawUnit === "in" ? "in" : "cm";
       const item: DimensionItem = {
         pieces: p,
         length: l,
         width: w,
         height: h,
-        unit: unit as "cm" | "m",
+        unit,
         gross_weight: parts.length > 1 ? Number((grossWeight / parts.length).toFixed(2)) : grossWeight,
         volume: 0,
         volumetric_weight: 0,
@@ -198,6 +211,9 @@ export function parseDimensionsString(
     },
   ];
 }
+export const LB_PER_KG = 2.20462262;
+export const KG_PER_LB = 0.45359237;
+
 export const blankCargo = (): Cargo => ({
   description: "",
   pieces: 1,
@@ -214,6 +230,167 @@ export const blankCargo = (): Cargo => ({
   volumetric_weight: 0,
   dimension_items: [blankDimensionItem()],
 });
+
+export function recalculateCommodityCargo(
+  c: Cargo,
+  dimensionItems: DimensionItem[],
+  mode: string = "air",
+  divisorType: "standard" | "express" = "standard",
+): Cargo {
+  const updatedDims = dimensionItems.map((dim) => {
+    const calc = calcDimensionItem(dim, mode, divisorType);
+    // When L x W x H dimensions exist (calc.volume > 0), always use the fresh mode/divisor volumetric weight!
+    // When only standalone CBM volume exists without L/W/H, recalculate volumetric weight from CBM for the active mode/divisor.
+    const existingVol = Math.max(0, Number(dim.volume) || 0);
+    let fallbackVolWeight = 0;
+    if (calc.volume <= 0 && existingVol > 0) {
+      if (mode === "air") {
+        const airDiv = divisorType === "express" ? 5000 : 6000;
+        fallbackVolWeight = Number((existingVol * (1000000 / airDiv)).toFixed(2));
+      } else if (mode === "road") {
+        fallbackVolWeight = Number((existingVol * (1000000 / 3000)).toFixed(2));
+      } else {
+        fallbackVolWeight = Number((existingVol * 1000).toFixed(2));
+      }
+    } else if (
+      calc.volume <= 0 &&
+      dim.volumetric_weight !== undefined &&
+      dim.volumetric_weight !== null &&
+      !Number.isNaN(dim.volumetric_weight) &&
+      dim.volumetric_weight > 0
+    ) {
+      fallbackVolWeight = dim.volumetric_weight;
+    }
+    return {
+      ...dim,
+      volume: calc.volume > 0 ? calc.volume : existingVol,
+      volumetric_weight: calc.volume > 0 ? calc.volumetric_weight : fallbackVolWeight,
+    };
+  });
+
+  const totPieces = updatedDims.reduce((s, d) => s + (Number(d.pieces) || 0), 0);
+  const totGross = Number(
+    updatedDims.reduce((s, d) => s + (Number(d.gross_weight) || 0), 0).toFixed(2),
+  );
+  const totVol = Number(
+    updatedDims.reduce((s, d) => s + (Number(d.volume) || 0), 0).toFixed(4),
+  );
+  const totVolWeight = Number(
+    updatedDims.reduce((s, d) => s + (Number(d.volumetric_weight) || 0), 0).toFixed(2),
+  );
+  const grossKg = c.weight_unit === "lb" ? totGross * KG_PER_LB : totGross;
+  const autoCW = Number(Math.max(grossKg, totVolWeight).toFixed(2));
+
+  return {
+    ...c,
+    dimension_items: updatedDims,
+    pieces: totPieces > 0 ? totPieces : c.pieces || 1,
+    gross_weight: totGross,
+    volume: totVol,
+    volumetric_weight: totVolWeight,
+    dimensions: formatDimensions(updatedDims),
+    chargeable_weight: autoCW,
+  };
+}
+
+export function calculateConsignmentTotals(cargoList: Cargo[]) {
+  const totalPieces = cargoList.reduce((s, c) => s + (Number(c.pieces) || 0), 0);
+  const totalGrossKg = Number(
+    cargoList
+      .reduce(
+        (s, c) =>
+          s + (Number(c.gross_weight) || 0) * (c.weight_unit === "lb" ? KG_PER_LB : 1),
+        0,
+      )
+      .toFixed(2),
+  );
+  const totalVolumetricKg = Number(
+    cargoList.reduce((s, c) => s + (Number(c.volumetric_weight) || 0), 0).toFixed(2),
+  );
+  const totalVolumeCbm = Number(
+    cargoList.reduce((s, c) => s + (Number(c.volume) || 0), 0).toFixed(4),
+  );
+  const autoChargeableWeightKg = Number(Math.max(totalGrossKg, totalVolumetricKg).toFixed(2));
+  const autoChargeableWeightLb = Number((autoChargeableWeightKg * LB_PER_KG).toFixed(2));
+  return {
+    totalPieces,
+    totalGrossKg,
+    totalVolumetricKg,
+    totalVolumeCbm,
+    autoChargeableWeightKg,
+    autoChargeableWeightLb,
+  };
+}
+
+export function formatCargoSummaryText(cargoList: Cargo[]): string {
+  const totals = calculateConsignmentTotals(cargoList);
+  const lines = cargoList
+    .filter((c) => c.description.trim() || c.gross_weight > 0 || c.volume > 0 || c.pieces > 0)
+    .map((c, idx) => {
+      const dims = c.dimensions || formatDimensions(c.dimension_items);
+      return `${idx + 1}. ${c.description.trim() || "General Cargo"} — ${c.pieces || 1} pcs, ${Number(c.gross_weight || 0).toFixed(2)} ${c.weight_unit || "kg"}${dims ? `, dims: ${dims}` : ""}, ${Number(c.volume || 0).toFixed(4)} m³, vol wt: ${Number(c.volumetric_weight || 0).toFixed(2)} kg`;
+    });
+  if (!lines.length) return "";
+  return `${lines.join("\n")}\nTotal: ${totals.totalPieces} pcs · Gross ${totals.totalGrossKg.toFixed(2)} kg · Vol Wt ${totals.totalVolumetricKg.toFixed(2)} kg · Volume ${totals.totalVolumeCbm.toFixed(4)} m³ · Chargeable ${totals.autoChargeableWeightKg.toFixed(2)} kg`;
+}
+
+export function formatRateUnitLabel(unit?: string | null): string {
+  const u = (unit || "per_shipment").toLowerCase();
+  if (u === "per_kg" || u === "kg") return "/ kg";
+  if (u === "per_lb" || u === "lb") return "/ lb";
+  if (u === "per_m3" || u === "per_cbm" || u === "cbm" || u === "m3") return "/ m³";
+  if (u === "per_container" || u === "container") return "/ container";
+  return "/ shipment";
+}
+
+export function calculateRateBuyAmount(
+  rate: Record<string, any>,
+  chargeableWeightKg: number,
+  volumeCbm: number,
+  unitCount = 1,
+): number {
+  const rateUnit = String(rate.rate_unit || "").toLowerCase();
+  const basePaise = Number(rate.base_rate_paise || 0);
+  const perKgPaise = Number(rate.per_kg_rate_paise || 0);
+  const perCbmPaise = Number(rate.per_cbm_rate_paise || 0);
+  const unitPaise = Number(rate.unit_rate_paise || 0);
+  const perLbPaise = Number(rate.per_lb_rate_paise || 0);
+
+  if (rateUnit === "per_lb") {
+    const lbRate = unitPaise || perLbPaise || Math.round(perKgPaise / LB_PER_KG);
+    const wtLb = chargeableWeightKg * LB_PER_KG;
+    return Number(((basePaise + wtLb * lbRate) / 100).toFixed(2));
+  }
+  if (rateUnit === "per_kg") {
+    const kgRate = unitPaise || perKgPaise;
+    return Number(((basePaise + chargeableWeightKg * kgRate) / 100).toFixed(2));
+  }
+  if (rateUnit === "per_m3" || rateUnit === "per_cbm") {
+    const cbmRate = unitPaise || perCbmPaise;
+    return Number(((basePaise + volumeCbm * cbmRate) / 100).toFixed(2));
+  }
+  if (rateUnit === "per_container" || rateUnit === "per_shipment") {
+    const flatPaise = unitPaise || basePaise;
+    return Number(((flatPaise * Math.max(1, unitCount)) / 100).toFixed(2));
+  }
+  return Number(
+    ((basePaise + chargeableWeightKg * perKgPaise + volumeCbm * perCbmPaise) / 100).toFixed(2),
+  );
+}
+
+export function calculateSellFromBuy(
+  buyAmount: number,
+  profitValue: number,
+  pricingMethod: "margin" | "markup" | "fixed" = "margin",
+): number {
+  if (pricingMethod === "fixed") {
+    return Number((buyAmount + profitValue).toFixed(2));
+  }
+  if (pricingMethod === "markup") {
+    return Number((buyAmount * (1 + Math.max(0, profitValue) / 100)).toFixed(2));
+  }
+  return Number((buyAmount / (1 - Math.min(Math.max(0, profitValue), 99.99) / 100)).toFixed(2));
+}
 export interface Job {
   id: string;
   ref_number: string;
@@ -270,16 +447,27 @@ export function mawbWarning(value: string): string | null {
     return "Possible typo: MAWB check digit does not match the IATA modulus-7 check.";
   return null;
 }
-export const dateLabel = (value?: string | null) =>
-  value
-    ? new Intl.DateTimeFormat("en-GB", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(new Date(value))
-    : "—";
-export const moneyLabel = (value: unknown, currency = "USD") =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-    Number(value || 0),
-  );
+export const dateLabel = (value?: string | null) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(d);
+};
+export const moneyLabel = (value: unknown, currency = "USD") => {
+  const num = Number(value || 0);
+  const safeNum = Number.isFinite(num) ? num : 0;
+  const code = String(currency || "USD").trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(code)) {
+    try {
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: code }).format(safeNum);
+    } catch {
+      // Fallback for unrecognized 3-letter codes
+    }
+  }
+  return `${code || "USD"} ${safeNum.toFixed(2)}`;
+};
 export const errorMessage = (error: unknown) =>
   (error as { message?: string })?.message || "Unable to save. Try again.";
