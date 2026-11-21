@@ -148,6 +148,51 @@ export default function DashboardPage() {
   const trends = (data?.monthly_trends || []) as Row[];
   const lanes = (data?.lane_performance || []) as CorridorLane[];
   const exc = (data?.exception_summary || {}) as Row;
+  const pipelineStages = (data?.lifecycle_pipeline || []) as Row[];
+  const stageCountMap = new Map<string, number>(
+    pipelineStages.map((s) => [String(s.key || ""), Number(s.count || 0)]),
+  );
+  const statusMap = (data?.statuses || {}) as Record<string, number>;
+  const sumStatuses = (keys: string[]) =>
+    keys.reduce((acc, k) => acc + Number(statusMap[k] || 0), 0);
+  const bookedOriginCount = pipelineStages.length
+    ? (stageCountMap.get("booking_origin") || 0) + (stageCountMap.get("export_ops") || 0)
+    : sumStatuses([
+        "draft",
+        "quoted",
+        "quote_sent",
+        "quote_accepted",
+        "booked",
+        "booking_confirmed",
+        "pickup_scheduled",
+        "pickup_in_progress",
+        "on_hold",
+        "picked_up",
+        "at_warehouse",
+        "at_origin_warehouse",
+        "customs_export",
+        "customs_export_pending",
+        "customs_export_cleared",
+        "gate_in",
+        "loaded_on_vessel",
+        "awaiting_departure",
+      ]);
+  const mainlineInTransitCount = pipelineStages.length
+    ? stageCountMap.get("in_transit") || 0
+    : sumStatuses(["departed", "in_transit", "transshipment", "exception"]);
+  const arrivedPortCount = pipelineStages.length
+    ? stageCountMap.get("arrival_clearance") || 0
+    : sumStatuses([
+        "arrived",
+        "arrived_at_destination_port",
+        "customs_import",
+        "customs_import_pending",
+        "customs_import_cleared",
+        "customs_hold",
+        "at_destination_warehouse",
+        "out_for_delivery",
+        "delivery_attempted",
+      ]);
 
   const shipSpark = trends.map((t) => Number(t.shipments || 0));
   const delivSpark = trends.map((t) => Number(t.delivered || 0));
@@ -447,7 +492,9 @@ export default function DashboardPage() {
                 <GlobalCorridorMap
                   lanes={lanes}
                   summary={{
-                    in_transit: Number(data?.open_jobs || 0),
+                    booked: bookedOriginCount,
+                    in_transit: mainlineInTransitCount,
+                    arrived: arrivedPortCount,
                     delivered: Number(data?.completed || 0),
                     dd_at_risk: Number(kpis.dd_at_risk || 0),
                     delayed: Number(kpis.delayed_shipments || 0),
@@ -924,7 +971,10 @@ export default function DashboardPage() {
                                 >
                                   {riskCount} at risk
                                 </strong>{" "}
-                                · {lane.on_time_pct}% OTP
+                                ·{" "}
+                                {lane.on_time_pct == null
+                                  ? "Scheduled"
+                                  : `${lane.on_time_pct}% OTP`}
                               </span>
                             </div>
                             <div className="h-2 w-full overflow-hidden rounded-full bg-[#f1eff9]">

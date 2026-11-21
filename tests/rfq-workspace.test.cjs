@@ -203,7 +203,7 @@ function screen(file, component, props = {}, dataOverrides = {}) {
       return { PackingDocuments: () => null };
     if (name === "@/components/freight/dashboard-visuals" || name === "./dashboard-visuals")
       return compile("components/freight/dashboard-visuals.tsx", (dep) => {
-        if (dep === "react") return { ...React, useState: (init) => [typeof init === "function" ? init() : init, () => {}] };
+        if (dep === "react") return { ...React, useState: (init) => [typeof init === "function" ? init() : init, () => {}], useEffect: () => {}, useRef: (init) => ({ current: init }) };
         if (dep === "next/link") return { __esModule: true, default: (pr) => React.createElement("a", pr, pr.children) };
         return require(dep);
       });
@@ -1142,4 +1142,51 @@ test("Control Tower multi-dashboard switcher renders Operations, Exceptions, Sal
   tree = ui.render();
   assert.match(deepText(tree), /Aarav Rao/);
   assert.match(deepText(tree), /12 \/ 15 jobs \(80%\)/);
+});
+
+test("GlobalCorridorMap resolves real geographic hub coordinates and unified 4-state corridor health", () => {
+  const visuals = compile("components/freight/dashboard-visuals.tsx", (dep) => {
+    if (dep === "react")
+      return {
+        ...React,
+        useState: (init) => [typeof init === "function" ? init() : init, () => {}],
+        useEffect: () => {},
+        useRef: (init) => ({ current: init }),
+      };
+    if (dep === "next/link")
+      return { __esModule: true, default: (pr) => React.createElement("a", pr, pr.children) };
+    return require(dep);
+  });
+  const [aacLat, aacLng] = visuals.resolveRealLatLng("AAC", "Egypt", "Al Arish");
+  assert.ok(aacLat > 30 && aacLat < 32 && aacLng > 33 && aacLng < 35);
+  const [aalLat, aalLng] = visuals.resolveRealLatLng("AAL", "Denmark", "Alborg");
+  assert.ok(aalLat > 56 && aalLat < 58 && aalLng > 9 && aalLng < 11);
+  const [auhLat, auhLng] = visuals.resolveRealLatLng("AUH - ABU ", "United Arab Emirates", "Abu Dhabi");
+  assert.ok(auhLat > 24 && auhLat < 25 && auhLng > 54 && auhLng < 55);
+  const [mctBrLat] = visuals.resolveRealLatLng("MCT", "BR", "Miracatu");
+  assert.ok(mctBrLat < -20);
+  const [mctBeLat] = visuals.resolveRealLatLng("MCT", "BE", "Mourcourt");
+  assert.ok(mctBeLat > 50);
+
+  const scheduled = visuals.getCorridorStatus({
+    origin_code: "AAC",
+    dest_code: "AAL",
+    shipments: 2,
+    delayed: 0,
+    evaluated: 0,
+    on_time_pct: null,
+  });
+  assert.equal(scheduled.key, "scheduled");
+  assert.equal(scheduled.color, "#38bdf8");
+
+  const delayed = visuals.getCorridorStatus({
+    origin_code: "MCT",
+    dest_code: "AAN",
+    shipments: 1,
+    delayed: 1,
+    evaluated: 1,
+    on_time_pct: 0,
+  });
+  assert.equal(delayed.key, "delayed");
+  assert.equal(delayed.color, "#f43f5e");
 });
