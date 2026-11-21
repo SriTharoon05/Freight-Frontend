@@ -156,19 +156,21 @@ export default function DashboardPage() {
   const profitSpark = trends.map((t) => Number(t.profit_usd || 0));
   const sellSpark = trends.map((t) => Number(t.sell_usd || 0));
 
-  const otpPct =
-    kpis.on_time_departure_pct ??
-    (data?.carrier_performance?.length
-      ? Number(
-          (
-            data.carrier_performance.reduce(
-              (acc: number, c: Row) => acc + Number(c.on_time_percent || 0),
-              0,
-            ) / data.carrier_performance.length
-          ).toFixed(1),
-        )
-      : 100);
-  const otaPct = kpis.on_time_arrival_pct ?? otpPct;
+  const otpPct: number | null =
+    kpis.on_time_departure_pct !== undefined
+      ? kpis.on_time_departure_pct
+      : data?.carrier_performance?.length
+        ? Number(
+            (
+              data.carrier_performance.reduce(
+                (acc: number, c: Row) => acc + Number(c.on_time_percent || 0),
+                0,
+              ) / data.carrier_performance.length
+            ).toFixed(1),
+          )
+        : null;
+  const otaPct: number | null =
+    kpis.on_time_arrival_pct !== undefined ? kpis.on_time_arrival_pct : null;
   const totalExceptions =
     exc.total ??
     Number(data?.overdue_milestones || 0) +
@@ -362,23 +364,33 @@ export default function DashboardPage() {
               />
               <KpiSparkCard
                 label="On-Time Departure"
-                value={`${otpPct}%`}
-                subtitle={`${data?.completed ?? 0} completed jobs`}
+                value={otpPct === null ? "—" : `${otpPct}%`}
+                subtitle={
+                  otpPct === null
+                    ? "No departures due yet"
+                    : Number(kpis.departed_overdue || 0) > 0
+                      ? `${kpis.departed_on_time ?? 0} on-time · ${kpis.departed_overdue} past ETD`
+                      : `${kpis.departed_on_time ?? 0}/${kpis.departed_evaluated ?? 0} departed on time`
+                }
                 sparkline={delivSpark}
-                tone="emerald"
+                tone={otpPct !== null && otpPct < 80 ? "rose" : "emerald"}
                 icon={<CheckCircle2 size={17} />}
                 href="/milestones"
               />
               <KpiSparkCard
                 label="On-Time Arrival"
-                value={`${otaPct}%`}
+                value={otaPct === null ? "—" : `${otaPct}%`}
                 subtitle={
-                  kpis.avg_transit_days
-                    ? `Avg transit ${kpis.avg_transit_days} days`
-                    : "Schedule adherence"
+                  otaPct === null
+                    ? `${kpis.arrived_count ?? 0} arrived · none past ETA`
+                    : Number(kpis.arrived_overdue || 0) > 0
+                      ? `${kpis.arrived_on_time ?? 0} arrived · ${kpis.arrived_overdue} past ETA`
+                      : kpis.avg_transit_days
+                        ? `Avg actual transit ${kpis.avg_transit_days}d`
+                        : `${kpis.arrived_on_time ?? 0}/${kpis.arrived_evaluated ?? 0} arrived on time`
                 }
                 sparkline={delivSpark}
-                tone="teal"
+                tone={otaPct !== null && otaPct < 80 ? "rose" : "teal"}
                 icon={<Globe size={17} />}
                 href="/shipments"
               />
@@ -444,7 +456,7 @@ export default function DashboardPage() {
               </div>
               <div className="xl:col-span-5">
                 <Panel
-                  title="Trade-lane reliability heatmap (POL × POD)"
+                  title="Trade-lane reliability heatmap · Origin (POL) × Dest (POD)"
                   action={
                     <Link href="/rates" className="text-xs font-semibold text-[#7068cf]">
                       Lane tariffs →

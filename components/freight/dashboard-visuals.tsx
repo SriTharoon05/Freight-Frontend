@@ -227,10 +227,53 @@ export function LifecyclePipelineBar({
       : (() => {
           const st = statuses || {};
           const buckets: [string, string, string[]][] = [
-            ["origin", "Booking & Origin", ["inquiry_received", "quoted", "booked", "draft", "pickup_scheduled"]],
-            ["export_ops", "Customs & Gate-In", ["picked_up", "at_warehouse", "customs_export", "gate_in", "awaiting_departure"]],
-            ["in_transit", "Mainline In-Transit", ["departed", "in_transit", "transshipment"]],
-            ["arrival_clearance", "Arrival & Clearance", ["arrived", "customs_import", "customs_hold", "out_for_delivery"]],
+            [
+              "origin",
+              "Booking & Origin",
+              [
+                "inquiry_received",
+                "quoted",
+                "quote_sent",
+                "quote_accepted",
+                "booked",
+                "booking_confirmed",
+                "draft",
+                "pickup_scheduled",
+                "pickup_in_progress",
+                "on_hold",
+              ],
+            ],
+            [
+              "export_ops",
+              "Customs & Gate-In",
+              [
+                "picked_up",
+                "at_warehouse",
+                "at_origin_warehouse",
+                "customs_export",
+                "customs_export_pending",
+                "customs_export_cleared",
+                "gate_in",
+                "loaded_on_vessel",
+                "awaiting_departure",
+              ],
+            ],
+            ["in_transit", "Mainline In-Transit", ["departed", "in_transit", "transshipment", "exception"]],
+            [
+              "arrival_clearance",
+              "Arrival & Clearance",
+              [
+                "arrived",
+                "arrived_at_destination_port",
+                "customs_import",
+                "customs_import_pending",
+                "customs_import_cleared",
+                "customs_hold",
+                "at_destination_warehouse",
+                "out_for_delivery",
+                "delivery_attempted",
+              ],
+            ],
             ["delivered", "Delivered", ["delivered", "closed"]],
           ];
           const counts = buckets.map(([key, label, keys]) => ({
@@ -315,8 +358,9 @@ export interface CorridorLane {
   delayed?: number;
   dd_risk?: number;
   at_risk?: number;
-  on_time_pct: number;
-  avg_transit_days?: number;
+  evaluated?: number;
+  on_time_pct: number | null;
+  avg_transit_days?: number | null;
 }
 
 // Normalized map coordinates (viewBox 640 x 300) for major global trade hubs & ISO country codes
@@ -498,11 +542,13 @@ export function GlobalCorridorMap({
             const dist = Math.hypot(x2 - x1, y2 - y1);
             const my = Math.min(y1, y2) - Math.max(18, dist * 0.22);
             const stroke =
-              lane.on_time_pct >= 90
-                ? "#34d399"
-                : lane.on_time_pct >= 75
-                  ? "#fbbf24"
-                  : "#fb7185";
+              lane.on_time_pct === null
+                ? "#60a5fa"
+                : lane.on_time_pct >= 90
+                  ? "#34d399"
+                  : lane.on_time_pct >= 75
+                    ? "#fbbf24"
+                    : "#fb7185";
             const isSelected = idx === selectedIdx;
             const strokeWidth = isSelected
               ? 2.8
@@ -601,7 +647,10 @@ export function GlobalCorridorMap({
               <strong>{activeLane.shipments}</strong> shipments
             </span>
             <span>
-              OTP: <strong className="text-emerald-300">{activeLane.on_time_pct}%</strong>
+              OTP:{" "}
+              <strong className="text-emerald-300">
+                {activeLane.on_time_pct === null ? "Pending" : `${activeLane.on_time_pct}%`}
+              </strong>
             </span>
             {!!activeLane.avg_transit_days && (
               <span>
@@ -656,8 +705,11 @@ export function LanePerformanceHeatmap({ lanes = [] }: { lanes?: CorridorLane[] 
         <table className="w-full border-separate border-spacing-1.5 text-xs">
           <thead>
             <tr>
-              <th className="px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#858693]">
-                POL \ POD
+              <th
+                title="POL = Port / Airport of Loading (Origin) · POD = Port / Airport of Discharge (Destination)"
+                className="px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#858693]"
+              >
+                Origin (POL) \ Dest (POD)
               </th>
               {dests.map((d) => (
                 <th
@@ -677,18 +729,21 @@ export function LanePerformanceHeatmap({ lanes = [] }: { lanes?: CorridorLane[] 
                 </td>
                 {dests.map((d) => {
                   const cell = lookup.get(`${o}__${d}`);
-                  const score = cell ? Math.round(cell.on_time_pct) : null;
+                  const score =
+                    cell && cell.on_time_pct !== null ? Math.round(cell.on_time_pct) : null;
                   return (
                     <td
                       key={`${o}-${d}`}
                       title={
                         cell
-                          ? `${o} → ${d}: ${cell.on_time_pct}% on-time (${cell.shipments} shipments)`
+                          ? cell.on_time_pct !== null
+                            ? `${o} → ${d}: ${cell.on_time_pct}% on-time (${cell.shipments} shipments)`
+                            : `${o} → ${d}: ${cell.shipments} booked (awaiting departure/arrival)`
                           : `${o} → ${d}: no shipments`
                       }
                       className={`rounded-lg px-2 py-2.5 text-center tabular-nums transition ${heatCellClass(score)}`}
                     >
-                      {score !== null ? `${score}%` : "—"}
+                      {score !== null ? `${score}%` : cell ? "Pending" : "—"}
                     </td>
                   );
                 })}

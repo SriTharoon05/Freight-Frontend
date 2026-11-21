@@ -45,3 +45,4 @@ partner-mobile/node_modules/
 partner-mobile/.env
 partner-mobile/.expo/
 /demo-sites/
+.netlify
