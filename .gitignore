@@ -46,3 +46,8 @@ partner-mobile/.env
 partner-mobile/.expo/
 /demo-sites/
 .netlify
+
+# cloudflare / opennext
+.open-next
+.wrangler
+.dev.vars

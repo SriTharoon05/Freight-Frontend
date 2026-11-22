@@ -8,12 +8,17 @@
     "start": "next start",
     "lint": "eslint app components lib --ext .ts,.tsx",
     "test": "node --test tests/api-client.test.cjs tests/mailbox-settings.test.cjs tests/mailbox-schedule.test.cjs tests/rfq-workspace.test.cjs tests/milestone-board.test.cjs tests/deployment-entrypoint.test.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cf:build": "opennextjs-cloudflare build",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
     "@netlify/plugin-nextjs": "^5.15.1",
     "@next/swc-wasm-nodejs": "13.5.1",
+    "@opennextjs/cloudflare": "^1.20.18",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-aspect-ratio": "^1.1.0",
@@ -61,7 +66,7 @@
     "eslint-config-next": "13.5.1",
     "input-otp": "^1.2.4",
     "lucide-react": "^0.446.0",
-    "next": "^16.3.8",
+    "next": "^16.4.6",
     "next-themes": "^0.3.0",
     "postcss": "^8.5.28",
     "react": "18.2.0",
@@ -78,5 +83,8 @@
     "vaul": "^0.9.9",
     "zod": "^3.23.8",
     "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "wrangler": "^4.166.0"
   }
 }

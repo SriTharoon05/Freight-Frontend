@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Cloudflare Worker that serves the FreightOS Next.js frontend via OpenNext.
+  "name": "freightos-frontend",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-03-01",
+  // nodejs_compat is required for Next.js server code and the Node.js proxy.ts.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      // Lets Next.js call itself (used by OpenNext for caching/revalidation).
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "freightos-frontend"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
