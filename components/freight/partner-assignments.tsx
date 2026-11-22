@@ -534,7 +534,50 @@ export function PartnerAssignments({ job }: { job: Job }) {
               : "Awaiting acknowledgement"}{" "}
             · GPS: {detailData.tracking_status}
           </p>
-          {detailData.driver && <p className="mt-2 text-xs">Driver: {detailData.driver.name} · {detailData.driver.phone}{detailData.driver.vehicle ? ` · ${detailData.driver.vehicle}` : ""} · Link expires {dateLabel(detailData.driver.expires_at)}</p>}
+          {detailData.driver && (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-xs">
+              <span>
+                Driver: <strong>{detailData.driver.name}</strong> · {detailData.driver.phone}
+                {detailData.driver.vehicle ? ` · ${detailData.driver.vehicle}` : ""} · Link expires{" "}
+                {dateLabel(detailData.driver.expires_at)}
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className={`${secondaryClass} !px-2.5 !py-1 text-[11px]`}
+                  onClick={async () => {
+                    try {
+                      const info = await freight.get<{ url: string }>(
+                        `/jobs/${job.id}/assignments/${detailData.id}/driver-link`,
+                      );
+                      await navigator.clipboard.writeText(info.url);
+                      toast.success("Copied driver magic link to clipboard");
+                    } catch (cause) {
+                      setError(cause);
+                    }
+                  }}
+                >
+                  Copy driver link
+                </button>
+                <button
+                  type="button"
+                  className={`${secondaryClass} !px-2.5 !py-1 text-[11px]`}
+                  onClick={async () => {
+                    try {
+                      const info = await freight.get<{ url: string }>(
+                        `/jobs/${job.id}/assignments/${detailData.id}/driver-link`,
+                      );
+                      window.open(info.url, "_blank", "noopener,noreferrer");
+                    } catch (cause) {
+                      setError(cause);
+                    }
+                  }}
+                >
+                  Open driver view ↗
+                </button>
+              </div>
+            </div>
+          )}
           {detailData.last_location && (
             <div className="mt-4 rounded-xl border p-3">
               <p className="text-xs font-semibold">

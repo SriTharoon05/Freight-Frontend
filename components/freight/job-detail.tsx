@@ -27,6 +27,8 @@ import {
   EntityAutocomplete,
   ChargeSelect,
   Panel,
+  StatusBadge,
+  ModeBadge,
   Field,
   ErrorBanner,
   Pager,
@@ -86,48 +88,75 @@ export function JobDetail({ id }: { id: string }) {
       <Link href="/shipments" className="text-xs text-[#858693]">
         ← Jobs
       </Link>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {data.ref_number}
-          </h1>
-          <p className="mt-1 text-sm text-[#858693]">
-            {data.customer_name} · {data.origin} → {data.destination}
-          </p>
-          <p className="mt-2 text-xs text-[#777884]">Created by: {data.created_by?.name || "Not recorded"} · Last edited by: {data.last_edited_by?.name || "Not recorded"}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            className={secondaryClass}
-            onClick={async () => {
-              try {
-                const share = await freight.get<{ path: string }>(`/jobs/${id}/tracking-share`);
-                const url = `${window.location.origin}${share.path}`;
-                await navigator.clipboard.writeText(url);
-                toast.success("Copied live customer tracking link");
-              } catch (cause) {
-                toast.error(errorMessage(cause));
-              }
-            }}
-          >
-            <Share2 size={13} />
-            Share live tracking
-          </button>
-          {data.version && !["finance", "customer"].includes(user?.role || "") && (
-            <Link className={secondaryClass} href={`/shipments/new?edit=${id}`}>Edit job</Link>
-          )}
+      <div className="rounded-2xl border border-[#23294d] bg-gradient-to-r from-[#11162c] via-[#192142] to-[#212b54] p-5 text-white shadow-[0_12px_32px_-16px_rgba(15,23,42,0.45)] sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <span className="text-[10px] font-bold text-[#858693]">ETD</span>
-            <p className="text-xs font-semibold">{dateLabel(data.etd)}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <ModeBadge mode={data.transport_mode} />
+              <StatusBadge status={data.status} />
+              {data.house_number && (
+                <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-slate-200">
+                  {data.house_number}
+                </span>
+              )}
+            </div>
+            <h1 className="mt-2.5 font-display text-2xl font-bold tracking-tight text-white">
+              {data.ref_number}
+            </h1>
+            <p className="mt-1 text-sm font-medium text-slate-200">
+              {data.customer_name} · {data.origin} → {data.destination}
+            </p>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              Created by: {data.created_by?.name || "Not recorded"} · Last edited by:{" "}
+              {data.last_edited_by?.name || "Not recorded"}
+            </p>
           </div>
-          <div>
-            <span className="text-[10px] font-bold text-[#858693]">ETA</span>
-            <p className="text-xs font-semibold">{dateLabel(data.eta)}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+              <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+                ETD
+              </span>
+              <p className="mt-0.5 text-xs font-semibold tabular-nums text-white">
+                {dateLabel(data.etd)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
+              <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+                ETA
+              </span>
+              <p className="mt-0.5 text-xs font-semibold tabular-nums text-white">
+                {dateLabel(data.eta)}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`${secondaryClass} !border-white/20 !bg-white/10 !text-white hover:!bg-white/20`}
+              onClick={async () => {
+                try {
+                  const share = await freight.get<{ path: string }>(
+                    `/jobs/${id}/tracking-share`,
+                  );
+                  const url = `${window.location.origin}${share.path}`;
+                  await navigator.clipboard.writeText(url);
+                  toast.success("Copied live customer tracking link");
+                } catch (cause) {
+                  toast.error(errorMessage(cause));
+                }
+              }}
+            >
+              <Share2 size={13} />
+              Share live tracking
+            </button>
+            {data.version &&
+              !["finance", "customer"].includes(user?.role || "") && (
+                <Link
+                  className={buttonClass}
+                  href={`/shipments/new?edit=${id}`}
+                >
+                  Edit job
+                </Link>
+              )}
           </div>
-          <span className="h-fit rounded-full bg-[#f0effc] px-3 py-1.5 text-xs font-semibold text-[#7068cf]">
-            {data.status.replaceAll("_", " ")}
-          </span>
         </div>
       </div>
       <ErrorBanner error={error} />
@@ -184,9 +213,14 @@ export function JobDetail({ id }: { id: string }) {
                 >
                   {[
                     "booking_confirmed",
+                    "picked_up",
+                    "customs_export_pending",
+                    "customs_export_cleared",
                     "in_transit",
+                    "arrived_at_destination_port",
                     "customs_import_pending",
                     "customs_import_cleared",
+                    "out_for_delivery",
                     "delivered",
                     "closed",
                     "on_hold",

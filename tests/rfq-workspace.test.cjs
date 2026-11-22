@@ -57,7 +57,7 @@ function screen(file, component, props = {}, dataOverrides = {}) {
       "ErrorBanner",
       "Pager",
       "EntityAutocomplete",
-      "ChargeSelect",
+      "ChargeSelect", "PageHero", "StatusBadge", "ModeBadge",
     ].map((name) => [name, passthrough]),
   );
   const queryFeedback = () => null;

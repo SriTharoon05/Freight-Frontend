@@ -156,7 +156,8 @@ export default function DashboardPage() {
   const sumStatuses = (keys: string[]) =>
     keys.reduce((acc, k) => acc + Number(statusMap[k] || 0), 0);
   const bookedOriginCount = pipelineStages.length
-    ? (stageCountMap.get("booking_origin") || 0) + (stageCountMap.get("export_ops") || 0)
+    ? (stageCountMap.get("origin") || stageCountMap.get("booking_origin") || 0) +
+      (stageCountMap.get("export_ops") || 0)
     : sumStatuses([
         "draft",
         "quoted",
@@ -501,8 +502,9 @@ export default function DashboardPage() {
                   }}
                 />
               </div>
-              <div className="xl:col-span-5">
+              <div className="flex flex-col gap-5 xl:col-span-5">
                 <Panel
+                  className="flex-1"
                   title="Trade-lane reliability heatmap · Origin (POL) × Dest (POD)"
                   action={
                     <Link href="/rates" className="text-xs font-semibold text-[#7068cf]">
@@ -512,6 +514,29 @@ export default function DashboardPage() {
                 >
                   <LanePerformanceHeatmap lanes={lanes} />
                 </Panel>
+                {!!data?.country_breakdown?.length && (
+                  <Panel title="Destination market distribution">
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                      {(data.country_breakdown as Row[]).slice(0, 6).map((c, idx) => (
+                        <div
+                          key={`${c.country}-${idx}`}
+                          className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs"
+                        >
+                          <p className="truncate font-semibold text-slate-800">
+                            {c.country || "Global"}
+                          </p>
+                          <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+                            <strong className="text-slate-900">{c.shipments}</strong>{" "}
+                            {Number(c.shipments) === 1 ? "job" : "jobs"}
+                            {Number(c.weight_kg) > 0
+                              ? ` · ${(Number(c.weight_kg) / 1000).toFixed(1)}t`
+                              : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
               </div>
             </div>
 
@@ -522,7 +547,7 @@ export default function DashboardPage() {
                   <MultiSeriesTrendChart
                     data={trends}
                     series={[
-                      { key: "shipments", label: "Total Booked", color: "#7068cf", kind: "area" },
+                      { key: "shipments", label: "Total Booked", color: "#7068cf", kind: "bar" },
                       { key: "delivered", label: "Delivered", color: "#10b981", kind: "line" },
                       { key: "delayed", label: "Delayed / Exception", color: "#e11d48", kind: "line" },
                     ]}

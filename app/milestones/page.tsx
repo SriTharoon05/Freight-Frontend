@@ -1,11 +1,26 @@
 "use client";
 
+import Link from "next/link";
 import { AppShell } from "@/components/shell/app-shell";
 import { MilestoneBoard } from "@/components/freight/milestone-board";
+import { PageHero, secondaryClass } from "@/components/freight/shared";
 
 export default function MilestonesPage() {
-  return <AppShell><div className="space-y-5">
-    <div><h1 className="text-2xl font-semibold tracking-tight">Milestones</h1><p className="mt-1 text-xs text-[#858693]">Vendor progress, completion targets and deadline risks in one view.</p></div>
-    <MilestoneBoard />
-  </div></AppShell>;
+  return (
+    <AppShell>
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Vendor SLA & Schedule Control"
+          title="End-to-End Milestone & Deadline Board"
+          subtitle="Monitor carrier departures, customs clearances, field partner tasks, and container detention deadlines in one unified operational timeline."
+          actions={
+            <Link href="/dd-watch" className={`${secondaryClass} !border-white/20 !bg-white/10 !text-white hover:!bg-white/20`}>
+              D&amp;D Container Watch →
+            </Link>
+          }
+        />
+        <MilestoneBoard />
+      </div>
+    </AppShell>
+  );
 }

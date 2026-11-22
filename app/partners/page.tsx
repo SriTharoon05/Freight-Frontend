@@ -13,10 +13,11 @@ import {
   Truck,
   Users,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/shell/app-shell";
 import { PartnerDirectory } from "@/components/freight/partner-directory";
-import { Panel, ErrorBanner, secondaryClass } from "@/components/freight/shared";
-import { freight, dateLabel } from "@/lib/freight";
+import { Panel, PageHero, ErrorBanner, secondaryClass } from "@/components/freight/shared";
+import { freight, dateLabel, errorMessage } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
 
 type LiveFleetItem = {
@@ -66,6 +67,17 @@ export default function PartnersPage() {
     refetchInterval: 15_000,
   });
 
+  const portalInfo = useQuery<{
+    configured: boolean;
+    partner_portal_url: string | null;
+    live_demo_url: string | null;
+  }>({
+    queryKey: ["freight", user?.tenant_id, "partner-portal-info"],
+    queryFn: () => freight.get("/partner-portal-info"),
+    enabled: !!user,
+    staleTime: 300_000,
+  });
+
   const allItems: LiveFleetItem[] = fleet.data?.items || [];
   const filtered = allItems.filter((item: LiveFleetItem) => {
     if (statusFilter === "active") {
@@ -85,41 +97,52 @@ export default function PartnersPage() {
 
   return (
     <AppShell>
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[#171725]">
-              Field Fleet, Drivers &amp; Partner Network
-            </h1>
-            <p className="mt-1 text-sm text-[#777884]">
-              Monitor live GPS locations, checkpoint updates, driver vehicles, and ETAs across pickup, delivery, and customs tasks — or manage partner approvals.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              aria-pressed={tab === "fleet"}
-              onClick={() => setTab("fleet")}
-              className={`${secondaryClass} ${
-                tab === "fleet" ? "!border-[#7068cf] !bg-[#f4f2ff] !text-[#7068cf]" : ""
-              }`}
-            >
-              <Navigation size={14} />
-              Live Driver &amp; Agent Tracker
-            </button>
-            <button
-              type="button"
-              aria-pressed={tab === "directory"}
-              onClick={() => setTab("directory")}
-              className={`${secondaryClass} ${
-                tab === "directory" ? "!border-[#7068cf] !bg-[#f4f2ff] !text-[#7068cf]" : ""
-              }`}
-            >
-              <Users size={14} />
-              Partner Directory &amp; Approvals
-            </button>
-          </div>
-        </div>
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Field Execution & Partner Telemetry"
+          title="Field Fleet, Drivers & Partner Network"
+          subtitle="Monitor live GPS locations, checkpoint updates, driver vehicles, magic links, and ETAs across pickup, delivery, and customs tasks — or manage partner approvals."
+          actions={
+            <>
+              <button
+                type="button"
+                aria-pressed={tab === "fleet"}
+                onClick={() => setTab("fleet")}
+                className={`${secondaryClass} ${
+                  tab === "fleet"
+                    ? "!border-[#38bdf8] !bg-white !text-[#111827]"
+                    : "!border-white/20 !bg-white/10 !text-white hover:!bg-white/20"
+                }`}
+              >
+                <Navigation size={14} />
+                Live Driver &amp; Agent Tracker
+              </button>
+              <button
+                type="button"
+                aria-pressed={tab === "directory"}
+                onClick={() => setTab("directory")}
+                className={`${secondaryClass} ${
+                  tab === "directory"
+                    ? "!border-[#38bdf8] !bg-white !text-[#111827]"
+                    : "!border-white/20 !bg-white/10 !text-white hover:!bg-white/20"
+                }`}
+              >
+                <Users size={14} />
+                Partner Directory &amp; Approvals
+              </button>
+              {portalInfo.data?.partner_portal_url && (
+                <a
+                  href={portalInfo.data.partner_portal_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`${secondaryClass} !border-[#38bdf8]/50 !bg-[#38bdf8]/15 !text-[#e0f2fe] hover:!bg-[#38bdf8]/25`}
+                >
+                  Partner Portal <ExternalLink size={13} />
+                </a>
+              )}
+            </>
+          }
+        />
 
         {tab === "directory" ? (
           <PartnerDirectory />
@@ -263,10 +286,30 @@ export default function PartnersPage() {
                                 Partner: <strong>{item.partner_name}</strong> ({item.kind.replaceAll("_", " ")})
                               </p>
                               {item.driver && (
-                                <p>
-                                  Driver: <strong>{item.driver.name}</strong>
-                                  {item.driver.phone ? ` · ${item.driver.phone}` : ""}
-                                  {item.driver.vehicle ? ` · ${item.driver.vehicle}` : ""}
+                                <p className="flex flex-wrap items-center gap-2">
+                                  <span>
+                                    Driver: <strong>{item.driver.name}</strong>
+                                    {item.driver.phone ? ` · ${item.driver.phone}` : ""}
+                                    {item.driver.vehicle ? ` · ${item.driver.vehicle}` : ""}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        const info = await freight.get<{ url: string }>(
+                                          `/jobs/${item.job_id}/assignments/${item.task_id}/driver-link`,
+                                        );
+                                        await navigator.clipboard.writeText(info.url);
+                                        toast.success("Copied driver magic link");
+                                      } catch (cause) {
+                                        toast.error(errorMessage(cause));
+                                      }
+                                    }}
+                                    className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#5b52c4] hover:bg-[#f5f3ff]"
+                                  >
+                                    Copy driver link
+                                  </button>
                                 </p>
                               )}
                               {loc && (

@@ -693,6 +693,7 @@ function computeCurvedArc(
 type LeafletGlobal = {
   map: (el: HTMLElement, opts?: Record<string, unknown>) => any;
   tileLayer: (url: string, opts?: Record<string, unknown>) => any;
+  geoJSON: (data: unknown, opts?: Record<string, unknown>) => any;
   layerGroup: () => any;
   polyline: (pts: [number, number][], opts?: Record<string, unknown>) => any;
   circleMarker: (pt: [number, number], opts?: Record<string, unknown>) => any;
@@ -702,6 +703,17 @@ type LeafletGlobal = {
 };
 
 let leafletLoadPromise: Promise<LeafletGlobal | null> | null = null;
+let worldGeoJsonPromise: Promise<unknown | null> | null = null;
+
+function loadWorldGeoJson(): Promise<unknown | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (!worldGeoJsonPromise) {
+    worldGeoJsonPromise = fetch("/leaflet/world-countries.json")
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+  }
+  return worldGeoJsonPromise;
+}
 
 function ensureLeafletLoaded(): Promise<LeafletGlobal | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
@@ -747,18 +759,22 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-const TILE_THEMES = {
-  dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+// 100% free, keyless map basemaps (Natural Earth self-hosted vector + OSM + Esri public imagery)
+const RASTER_TILE_THEMES = {
+  osm: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OSM</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>',
+      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
+    maxZoom: 19,
   },
-  voyager: {
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OSM</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>',
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
+    maxZoom: 18,
   },
 } as const;
+
+type CorridorMapStyle = "vector" | "osm" | "satellite";
 
 export function GlobalCorridorMap({
   lanes = [],
@@ -775,12 +791,12 @@ export function GlobalCorridorMap({
   };
 }) {
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
-  const [mapStyle, setMapStyle] = useState<"dark" | "voyager">("dark");
+  const [mapStyle, setMapStyle] = useState<CorridorMapStyle>("vector");
   const [mapReady, setMapReady] = useState<boolean>(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
-  const tileLayerRef = useRef<any>(null);
+  const baseLayerGroupRef = useRef<any>(null);
   const overlayGroupRef = useRef<any>(null);
   const hasFittedBoundsRef = useRef<boolean>(false);
   const prevLanesSigRef = useRef<string>("");
@@ -808,18 +824,11 @@ export function GlobalCorridorMap({
         attributionControl: true,
       });
 
-      const theme = TILE_THEMES.dark;
-      const tileLayer = L.tileLayer(theme.url, {
-        attribution: theme.attribution,
-        subdomains: "abcd",
-        maxZoom: 19,
-      });
-      tileLayer.addTo(map);
-
+      const baseGroup = L.layerGroup().addTo(map);
       const overlayGroup = L.layerGroup().addTo(map);
 
       mapInstanceRef.current = map;
-      tileLayerRef.current = tileLayer;
+      baseLayerGroupRef.current = baseGroup;
       overlayGroupRef.current = overlayGroup;
       setMapReady(true);
     });
@@ -829,30 +838,101 @@ export function GlobalCorridorMap({
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
-        tileLayerRef.current = null;
+        baseLayerGroupRef.current = null;
         overlayGroupRef.current = null;
       }
     };
   }, []);
 
-  // Switch tile basemap between Dark Radar & Daylight Street Atlas
+  // Switch basemap between Self-Hosted Natural Earth Vector Radar, Free OSM Street Map & Satellite
   useEffect(() => {
     if (!mapReady || typeof window === "undefined") return;
     const L = (window as unknown as { L?: LeafletGlobal }).L;
     const map = mapInstanceRef.current;
-    if (!L || !map) return;
+    const baseGroup = baseLayerGroupRef.current;
+    if (!L || !map || !baseGroup) return;
 
-    if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
+    let stale = false;
+    baseGroup.clearLayers();
+
+    if (mapContainerRef.current) {
+      mapContainerRef.current.style.background =
+        mapStyle === "osm" ? "#dbeafe" : "#081022";
     }
-    const theme = TILE_THEMES[mapStyle];
-    const nextTile = L.tileLayer(theme.url, {
-      attribution: theme.attribution,
-      subdomains: "abcd",
-      maxZoom: 19,
-    });
-    nextTile.addTo(map);
-    tileLayerRef.current = nextTile;
+
+    if (mapStyle === "vector") {
+      // Subtle maritime/aviation graticule lines across oceans
+      for (const lat of [-60, -30, 0, 30, 60]) {
+        L.polyline(
+          [
+            [lat, -360],
+            [lat, 360],
+          ],
+          {
+            color: lat === 0 ? "rgba(99,179,237,0.16)" : "rgba(148,163,184,0.08)",
+            weight: lat === 0 ? 1 : 0.7,
+            dashArray: lat === 0 ? undefined : "4 6",
+            interactive: false,
+          },
+        ).addTo(baseGroup);
+      }
+      for (const lng of [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150]) {
+        L.polyline(
+          [
+            [-80, lng],
+            [82, lng],
+          ],
+          {
+            color: "rgba(148,163,184,0.07)",
+            weight: 0.7,
+            dashArray: "4 6",
+            interactive: false,
+          },
+        ).addTo(baseGroup);
+      }
+
+      void loadWorldGeoJson().then((geoData) => {
+        if (stale || !geoData || !baseLayerGroupRef.current) return;
+        const baseStyle = {
+          fillColor: "#162344",
+          fillOpacity: 0.96,
+          color: "#2c4175",
+          weight: 0.85,
+        };
+        const geoLayer = L.geoJSON(geoData, {
+          style: () => baseStyle,
+          onEachFeature: (feature: any, layer: any) => {
+            const countryName = feature?.properties?.n;
+            if (countryName) {
+              layer.on({
+                mouseover: () =>
+                  layer.setStyle({
+                    fillColor: "#1f3260",
+                    color: "#4a69b8",
+                    weight: 1.1,
+                  }),
+                mouseout: () => layer.setStyle(baseStyle),
+              });
+            }
+          },
+        });
+        geoLayer.addTo(baseGroup);
+        if (overlayGroupRef.current && overlayGroupRef.current.bringToFront) {
+          overlayGroupRef.current.bringToFront();
+        }
+      });
+    } else {
+      const theme = RASTER_TILE_THEMES[mapStyle];
+      const nextTile = L.tileLayer(theme.url, {
+        attribution: theme.attribution,
+        maxZoom: theme.maxZoom,
+      });
+      nextTile.addTo(baseGroup);
+    }
+
+    return () => {
+      stale = true;
+    };
   }, [mapStyle, mapReady]);
 
   // Plot real geodesic trade corridors & deduplicated hub markers
@@ -978,10 +1058,11 @@ export function GlobalCorridorMap({
     }
 
     // Render crisp hub markers and non-overlapping IATA/UNLOCODE pill badges
+    const darkTheme = mapStyle !== "osm";
     for (const hub of Array.from(hubRegistry.values())) {
       const marker = L.circleMarker(hub.coord, {
         radius: hub.isSelected ? 6.5 : 4.8,
-        color: mapStyle === "dark" ? "#0f172a" : "#ffffff",
+        color: darkTheme ? "#0f172a" : "#ffffff",
         weight: 2,
         fillColor: hub.color,
         fillOpacity: 1,
@@ -997,16 +1078,14 @@ export function GlobalCorridorMap({
       marker.on("click", () => setSelectedIdx(hub.laneIdx));
       marker.addTo(group);
 
-      const labelBg =
-        mapStyle === "dark"
-          ? hub.isSelected
-            ? "rgba(15,23,42,0.94)"
-            : "rgba(15,23,42,0.78)"
-          : hub.isSelected
-            ? "rgba(15,23,42,0.92)"
-            : "rgba(255,255,255,0.92)";
-      const labelFg =
-        mapStyle === "dark" || hub.isSelected ? "#f8fafc" : "#0f172a";
+      const labelBg = darkTheme
+        ? hub.isSelected
+          ? "rgba(15,23,42,0.94)"
+          : "rgba(15,23,42,0.82)"
+        : hub.isSelected
+          ? "rgba(15,23,42,0.92)"
+          : "rgba(255,255,255,0.92)";
+      const labelFg = darkTheme || hub.isSelected ? "#f8fafc" : "#0f172a";
       const borderCol = hub.isSelected ? hub.color : "rgba(148,163,184,0.35)";
 
       const codeBadge = L.marker(hub.coord, {
@@ -1097,9 +1176,9 @@ export function GlobalCorridorMap({
           <div className="flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 p-0.5 text-[10px]">
             <button
               type="button"
-              onClick={() => setMapStyle("dark")}
+              onClick={() => setMapStyle("vector")}
               className={`rounded-md px-2 py-1 font-medium transition ${
-                mapStyle === "dark"
+                mapStyle === "vector"
                   ? "bg-[#7068cf] text-white"
                   : "text-[#b4c2e0] hover:text-white"
               }`}
@@ -1108,14 +1187,25 @@ export function GlobalCorridorMap({
             </button>
             <button
               type="button"
-              onClick={() => setMapStyle("voyager")}
+              onClick={() => setMapStyle("osm")}
               className={`rounded-md px-2 py-1 font-medium transition ${
-                mapStyle === "voyager"
+                mapStyle === "osm"
                   ? "bg-[#7068cf] text-white"
                   : "text-[#b4c2e0] hover:text-white"
               }`}
             >
-              Street Atlas
+              Street Map
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapStyle("satellite")}
+              className={`rounded-md px-2 py-1 font-medium transition ${
+                mapStyle === "satellite"
+                  ? "bg-[#7068cf] text-white"
+                  : "text-[#b4c2e0] hover:text-white"
+              }`}
+            >
+              Satellite
             </button>
             <button
               type="button"
@@ -1426,8 +1516,15 @@ export function MultiSeriesTrendChart({
   const allValues = data.flatMap((row) =>
     series.map((s) => Math.max(0, Number(row[s.key] || 0))),
   );
-  const maxVal = Math.max(4, ...allValues);
-  const niceMax = Math.ceil(maxVal * 1.15);
+  const rawMax = Math.max(0, ...allValues);
+  const step = Math.max(1, Math.ceil((Math.max(3, rawMax) * 1.15) / 4));
+  const niceMax = step * 4;
+
+  const seriesTotals = new Map<string, number>();
+  for (const s of series) {
+    const sum = data.reduce((acc, row) => acc + Math.max(0, Number(row[s.key] || 0)), 0);
+    seriesTotals.set(s.key, Math.round(sum * 100) / 100);
+  }
 
   const xAt = (i: number) =>
     data.length === 1 ? padL + plotW / 2 : padL + (i / (data.length - 1)) * plotW;
@@ -1436,20 +1533,38 @@ export function MultiSeriesTrendChart({
   const barSeries = series.filter((s) => s.kind === "bar");
   const lineSeries = series.filter((s) => s.kind !== "bar");
   const slotW = plotW / Math.max(1, data.length);
-  const barW = barSeries.length ? Math.min(20, (slotW * 0.58) / barSeries.length) : 0;
+  const barW = barSeries.length ? Math.min(24, (slotW * 0.52) / barSeries.length) : 0;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-4 text-[11px]">
-        {series.map((s) => (
-          <span key={s.key} className="inline-flex items-center gap-1.5 font-medium text-[#4a4b59]">
+        {series.map((s) => {
+          const total = seriesTotals.get(s.key) || 0;
+          const formattedTotal =
+            total >= 1000
+              ? `${valuePrefix}${(total / 1000).toFixed(1)}k`
+              : `${valuePrefix}${total.toLocaleString()}`;
+          return (
             <span
-              className="h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: s.color }}
-            />
-            {s.label}
-          </span>
-        ))}
+              key={s.key}
+              className={`inline-flex items-center gap-1.5 font-medium ${
+                total === 0 ? "text-[#9ca3af]" : "text-[#4a4b59]"
+              }`}
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{
+                  backgroundColor: s.color,
+                  opacity: total === 0 ? 0.45 : 1,
+                }}
+              />
+              <span>{s.label}</span>
+              <span className="rounded bg-[#f3f2f9] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-[#5b5c6e]">
+                {formattedTotal}
+              </span>
+            </span>
+          );
+        })}
       </div>
 
       <svg
@@ -1467,21 +1582,21 @@ export function MultiSeriesTrendChart({
           ))}
         </defs>
 
-        {/* Gridlines & Y-axis ticks */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const val = Math.round(niceMax * ratio);
+        {/* Gridlines & evenly-spaced integer Y-axis ticks */}
+        {[0, 1, 2, 3, 4].map((tickIdx) => {
+          const val = step * tickIdx;
           const y = yAt(val);
           const formatted =
             val >= 1000 ? `${valuePrefix}${(val / 1000).toFixed(1)}k` : `${valuePrefix}${val}`;
           return (
-            <g key={ratio}>
+            <g key={tickIdx}>
               <line
                 x1={padL}
                 y1={y}
                 x2={W - padR}
                 y2={y}
-                stroke="#eeecf5"
-                strokeDasharray={ratio === 0 ? undefined : "3 3"}
+                stroke={tickIdx === 0 ? "#dfe1ec" : "#eeecf5"}
+                strokeDasharray={tickIdx === 0 ? undefined : "3 3"}
               />
               <text
                 x={padL - 8}
@@ -1496,24 +1611,25 @@ export function MultiSeriesTrendChart({
           );
         })}
 
-        {/* Optional grouped bars */}
+        {/* Optional grouped bars (only rendered when value > 0) */}
         {barSeries.map((s, bIdx) =>
           data.map((row, i) => {
             const val = Math.max(0, Number(row[s.key] || 0));
+            if (val <= 0) return null;
             const cx = xAt(i);
             const x = cx - (barSeries.length * barW) / 2 + bIdx * barW;
             const y = yAt(val);
-            const h = Math.max(1, padT + plotH - y);
+            const h = Math.max(3, padT + plotH - y);
             return (
               <rect
                 key={`${s.key}-${i}`}
                 x={x}
                 y={y}
-                width={Math.max(4, barW - 2)}
+                width={Math.max(8, barW - 2)}
                 height={h}
-                rx="3"
+                rx="4"
                 fill={s.color}
-                fillOpacity="0.82"
+                fillOpacity="0.85"
               >
                 <title>{`${row.label} · ${s.label}: ${valuePrefix}${val.toLocaleString()}`}</title>
               </rect>
@@ -1521,35 +1637,59 @@ export function MultiSeriesTrendChart({
           }),
         )}
 
-        {/* Area & Line series */}
+        {/* Area & Line series (suppresses flat 0-lines along the X-axis) */}
         {lineSeries.map((s) => {
-          const pts = data.map((row, i) => [xAt(i), yAt(Number(row[s.key] || 0))] as const);
-          const dLine = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+          const values = data.map((row) => Math.max(0, Number(row[s.key] || 0)));
+          const firstNonZero = values.findIndex((v) => v > 0);
+          // Never paint a colored stroke along y=0 when the entire series is zero
+          if (firstNonZero === -1) return null;
+
+          let lastNonZero = values.length - 1;
+          while (lastNonZero > firstNonZero && values[lastNonZero] <= 0) {
+            lastNonZero -= 1;
+          }
+          const startIdx = Math.max(0, firstNonZero - 1);
+          const endIdx = Math.min(data.length - 1, lastNonZero + 1);
+          const sliceIndices: number[] = [];
+          for (let idx = startIdx; idx <= endIdx; idx += 1) {
+            sliceIndices.push(idx);
+          }
+
+          const pts = sliceIndices.map((idx) => [xAt(idx), yAt(values[idx]), idx] as const);
+          const dLine = pts
+            .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
+            .join(" ");
           const dArea = `${dLine} L${pts[pts.length - 1][0].toFixed(1)},${padT + plotH} L${pts[0][0].toFixed(1)},${padT + plotH} Z`;
           return (
             <g key={s.key}>
-              {s.kind === "area" && <path d={dArea} fill={`url(#trend-grad-${s.key})`} />}
-              <path
-                d={dLine}
-                fill="none"
-                stroke={s.color}
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {pts.map(([x, y], i) => (
-                <circle
-                  key={`${s.key}-pt-${i}`}
-                  cx={x}
-                  cy={y}
-                  r="3.2"
-                  fill="#ffffff"
+              {s.kind === "area" && pts.length > 1 && (
+                <path d={dArea} fill={`url(#trend-grad-${s.key})`} />
+              )}
+              {pts.length > 1 && (
+                <path
+                  d={dLine}
+                  fill="none"
                   stroke={s.color}
-                  strokeWidth="2"
-                >
-                  <title>{`${data[i].label} · ${s.label}: ${valuePrefix}${Number(data[i][s.key] || 0).toLocaleString()}`}</title>
-                </circle>
-              ))}
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+              {pts
+                .filter(([, , idx]) => values[idx] > 0 || pts.length === 1)
+                .map(([x, y, idx]) => (
+                  <circle
+                    key={`${s.key}-pt-${idx}`}
+                    cx={x}
+                    cy={y}
+                    r="3.6"
+                    fill="#ffffff"
+                    stroke={s.color}
+                    strokeWidth="2.2"
+                  >
+                    <title>{`${data[idx].label} · ${s.label}: ${valuePrefix}${values[idx].toLocaleString()}`}</title>
+                  </circle>
+                ))}
             </g>
           );
         })}

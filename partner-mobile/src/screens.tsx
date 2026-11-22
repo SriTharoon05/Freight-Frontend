@@ -499,6 +499,15 @@ export function TaskDetail({
                 setDriverLink(link);
                 await Linking.openURL(link.whatsapp_url);
               }}>Share driver link on WhatsApp</Button>
+              <Button secondary onPress={async () => {
+                const link = await api(`/tasks/${task.id}/driver-link`);
+                setDriverLink(link);
+                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                  await navigator.clipboard.writeText(link.url);
+                } else {
+                  await Linking.openURL(link.url);
+                }
+              }}>Copy / retrieve driver link</Button>
             </>
           )}
           {task.status !== "awaiting_verification" && (
@@ -532,7 +541,9 @@ export function TaskDetail({
           {driverLink && (
             <>
               <Info>WhatsApp: {label(driverLink.whatsapp_status)} · Link expires {new Date(driverLink.expires_at).toLocaleString()}</Info>
+              <Info>Direct magic link: {driverLink.url}</Info>
               <Button secondary onPress={() => Linking.openURL(driverLink.whatsapp_url)}>Open WhatsApp with driver link</Button>
+              <Button secondary onPress={() => Linking.openURL(driverLink.url)}>Open driver link in browser</Button>
             </>
           )}
           <Heading>Submitted proofs</Heading>

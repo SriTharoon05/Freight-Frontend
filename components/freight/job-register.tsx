@@ -2,10 +2,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { ArrowRight } from "lucide-react";
 import { AppShell } from "@/components/shell/app-shell";
 import { freight, type Page, type Job, dateLabel } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
-import { Panel, Pager, ErrorBanner } from "./shared";
+import { Panel, PageHero, StatusBadge, Pager, ErrorBanner } from "./shared";
 
 export function JobRegister({ kind }: { kind: "dd" | "audit" }) {
   const user = useAuthStore((s) => s.user),
@@ -21,63 +22,84 @@ export function JobRegister({ kind }: { kind: "dd" | "audit" }) {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold">
-          {kind === "dd" ? "D&D Watch" : "Invoice & Audit"}
-        </h1>
+        <PageHero
+          eyebrow={kind === "dd" ? "Demurrage & Detention Shield" : "Revenue & Cost Governance"}
+          title={kind === "dd" ? "Container Free-Time & D&D Watch" : "Invoice, Buy/Sell Margin & 4-Way Audit"}
+          subtitle={
+            kind === "dd"
+              ? "Proactively clear customs and return empty equipment before port demurrage or carrier detention clocks expire."
+              : "Audit vendor bills against contracted rate cards, verify buy-vs-sell job margins, and manage customer billing."
+          }
+        />
         <Panel
           title={kind === "dd" ? "Free time exposure" : "Job financial records"}
+          action={
+            <span className="text-xs font-medium tabular-nums text-slate-500">
+              {data.data?.total ?? 0} records
+            </span>
+          }
         >
           <ErrorBanner error={data.error} />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b text-[#858693]">
+              <thead className="bg-slate-50/90 text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <tr>
                   {[
                     "Job / Customer",
-                    "Route",
+                    "Route (POL → POD)",
                     "ETD",
                     "ETA",
                     kind === "dd" ? "Free time expires" : "Status",
                     "Actions",
                   ].map((h) => (
-                    <th className="p-3" key={h}>
+                    <th className="border-b border-slate-200/80 px-3.5 py-3" key={h}>
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {data.data?.items.map((j: Job) => (
-                  <tr key={j.id} className="border-b">
-                    <td className="p-3">
-                      <strong>{j.ref_number}</strong>
-                      <p className="mt-1 text-[#858693]">{j.customer_name}</p>
+                  <tr key={j.id} className="transition-colors hover:bg-[#f7f6ff]/70">
+                    <td className="px-3.5 py-3.5">
+                      <strong className="text-slate-900">{j.ref_number}</strong>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{j.customer_name}</p>
                     </td>
-                    <td className="p-3">
-                      {j.origin} → {j.destination}
+                    <td className="px-3.5 font-medium text-slate-800">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>{j.origin}</span>
+                        <ArrowRight size={11} className="text-slate-400" />
+                        <span>{j.destination}</span>
+                      </span>
                     </td>
-                    <td className="p-3">{dateLabel(j.etd)}</td>
-                    <td className="p-3">{dateLabel(j.eta)}</td>
-                    <td className="p-3">
-                      {kind === "dd"
-                        ? dateLabel(j.free_time_expires_at)
-                        : j.status.replaceAll("_", " ")}
-                    </td>
-                    <td className="p-3">
-                      <Link
-                        className="font-semibold text-[#7068cf]"
-                        href={`/shipments/${j.id}?tab=${kind === "dd" ? "Milestones" : "Audit"}`}
-                      >
-                        {kind === "dd" ? "Open milestones" : "Audit"}
-                      </Link>
-                      {kind === "audit" && (
-                        <Link
-                          className="ml-4 text-[#7068cf]"
-                          href={`/shipments/${j.id}?tab=Documents`}
-                        >
-                          Invoices
-                        </Link>
+                    <td className="px-3.5 tabular-nums text-slate-600">{dateLabel(j.etd)}</td>
+                    <td className="px-3.5 tabular-nums text-slate-600">{dateLabel(j.eta)}</td>
+                    <td className="px-3.5">
+                      {kind === "dd" ? (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
+                          {dateLabel(j.free_time_expires_at)}
+                        </span>
+                      ) : (
+                        <StatusBadge status={j.status} />
                       )}
+                    </td>
+                    <td className="px-3.5">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          className="rounded-lg bg-[#f2f0fe] px-2.5 py-1 text-[11px] font-semibold text-[#5b52c4] transition hover:bg-[#e5e1fc]"
+                          href={`/shipments/${j.id}?tab=${kind === "dd" ? "Milestones" : "Audit"}`}
+                        >
+                          {kind === "dd" ? "Open milestones →" : "Audit →"}
+                        </Link>
+                        {kind === "audit" && (
+                          <Link
+                            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50"
+                            href={`/shipments/${j.id}?tab=Documents`}
+                          >
+                            Invoices
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -85,7 +107,7 @@ export function JobRegister({ kind }: { kind: "dd" | "audit" }) {
             </table>
           </div>
           {data.data?.total === 0 && (
-            <p className="p-6 text-sm text-[#858693]">
+            <p className="p-8 text-center text-xs text-slate-500">
               {kind === "dd"
                 ? "No jobs within the D&D warning window."
                 : "No jobs found."}

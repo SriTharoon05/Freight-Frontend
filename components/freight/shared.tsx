@@ -18,11 +18,11 @@ import {
 } from "@/lib/freight";
 import { useAuthStore } from "@/lib/auth-store";
 export const inputClass =
-  "w-full rounded-lg border border-[#e5e3ee] bg-white px-3 py-2.5 text-[12px] text-[#343444] outline-none focus:border-[#7068cf] focus:ring-2 focus:ring-[#7068cf]/10 disabled:bg-[#f7f6fb]";
+  "w-full rounded-xl border border-slate-200/90 bg-white px-3.5 py-2.5 text-[12px] text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition outline-none placeholder:text-slate-400 focus:border-[#685fd1] focus:ring-4 focus:ring-[#685fd1]/10 disabled:bg-slate-50";
 export const buttonClass =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-[#7068cf] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#6259c1] disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#6b62d4] to-[#5570de] px-4 py-2.5 text-xs font-semibold text-white shadow-[0_4px_14px_rgba(99,91,210,0.24)] transition hover:brightness-105 active:scale-[0.99] disabled:opacity-50";
 export const secondaryClass =
-  "inline-flex items-center justify-center gap-2 rounded-xl border border-[#e5e3ee] bg-white px-3 py-2 text-xs font-medium hover:bg-[#f4f2ff] disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-[#685fd1]/40 hover:bg-[#f6f5ff] hover:text-[#584fc2] disabled:opacity-50";
 export function Field({
   label,
   children,
@@ -32,7 +32,7 @@ export function Field({
 }) {
   return (
     <label className="block min-w-0">
-      <span className="mb-1.5 block text-[11px] font-semibold text-[#777884]">
+      <span className="mb-1.5 block text-[11px] font-semibold tracking-[0.01em] text-slate-600">
         {label}
       </span>
       {children}
@@ -43,19 +43,106 @@ export function Panel({
   title,
   children,
   action,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   action?: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-2xl border border-[#eeecf5] bg-white p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[#343444]">{title}</h2>
+    <section
+      className={`rounded-2xl border border-slate-200/85 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_28px_-14px_rgba(15,23,42,0.07)] ${className}`}
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-gradient-to-br from-[#6b62d4] to-[#38bdf8]" />
+          <h2 className="text-[13.5px] font-semibold tracking-[-0.01em] text-slate-900">
+            {title}
+          </h2>
+        </div>
         {action}
       </div>
       {children}
     </section>
+  );
+}
+
+export function PageHero({
+  eyebrow,
+  title,
+  subtitle,
+  actions,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="relative overflow-hidden rounded-2xl border border-[#23294d] bg-gradient-to-r from-[#11162c] via-[#192142] to-[#212b54] p-5 text-white shadow-[0_12px_32px_-16px_rgba(15,23,42,0.45)] sm:p-6">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-[#38bdf8]/10 blur-3xl"
+      />
+      <div className="relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7dd3fc]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#38bdf8]" />
+            {eyebrow}
+          </span>
+          <h1 className="mt-2 font-display text-xl font-bold tracking-tight text-white sm:text-2xl">
+            {title}
+          </h1>
+          {subtitle && (
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-300">
+              {subtitle}
+            </p>
+          )}
+        </div>
+        {actions && <div className="flex flex-wrap items-center gap-2.5">{actions}</div>}
+      </div>
+    </header>
+  );
+}
+
+export function StatusBadge({ status }: { status?: string | null }) {
+  const raw = String(status || "pending").toLowerCase();
+  const label = raw.replaceAll("_", " ");
+  let style = "bg-slate-100 text-slate-700 ring-slate-200";
+  if (["delivered", "completed", "paid", "verified", "customs_import_cleared", "customs_export_cleared", "won", "accepted"].includes(raw)) {
+    style = "bg-emerald-50 text-emerald-700 ring-emerald-200/80";
+  } else if (["in_transit", "departed", "out_for_delivery", "picked_up", "issued", "sent", "generated", "quoted"].includes(raw)) {
+    style = "bg-sky-50 text-sky-700 ring-sky-200/80";
+  } else if (["booking_confirmed", "booked", "arrived", "arrived_at_destination_port", "awaiting_verification"].includes(raw)) {
+    style = "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
+  } else if (["draft", "quote_draft", "pending", "customs_import_pending", "customs_export_pending", "on_hold"].includes(raw)) {
+    style = "bg-amber-50 text-amber-800 ring-amber-200/80";
+  } else if (["overdue", "critical", "failed", "cancelled", "rejected", "lost", "exception"].includes(raw)) {
+    style = "bg-rose-50 text-rose-700 ring-rose-200/80";
+  }
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10.5px] font-semibold capitalize ring-1 ring-inset ${style}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75" />
+      {label}
+    </span>
+  );
+}
+
+export function ModeBadge({ mode }: { mode?: string | null }) {
+  const m = String(mode || "ocean").toLowerCase();
+  const style =
+    m === "air"
+      ? "bg-sky-50 text-sky-700 ring-sky-200/80"
+      : m === "road"
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200/80"
+        : m === "rail"
+          ? "bg-amber-50 text-amber-800 ring-amber-200/80"
+          : "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ring-inset ${style}`}>
+      {m}
+    </span>
   );
 }
 export function ErrorBanner({ error }: { error: unknown }) {
