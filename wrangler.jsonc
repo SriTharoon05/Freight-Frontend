@@ -17,6 +17,9 @@
       "service": "freightos-frontend"
     }
   ],
+  "vars": {
+    "BACKEND_API_BASE_URL": "https://freight-backend-fibk.onrender.com/api/v1"
+  },
   "observability": {
     "enabled": true
   }
